@@ -157,15 +157,24 @@ func process(coll *mgo.Collection, sernum string) {
     
     var parsed []*parser.Sync_Output
     var synco *parser.Sync_Output
+    var timeArr [6]int32
     var i int
+    var timestamp int64
     
     for continueIteration {
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
             synco = parsed[i]
-            fmt.Printf("time: %v\n", synco.Sync_Data.Times)
+            timeArr = synco.Sync_Data.Times
+            fmt.Printf("time: %v\n", timeArr)
+            if timeArr[0] < 2010 || timeArr[0] > 2020 {
+                // if the year is outside of this range things must have gotten corrupted somehow
+                fmt.Printf("Rejecting bad date record: year is %v\n", timeArr[0])
+                continue
+            }
+            timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
+            fmt.Printf("timestamp: %v\n", timestamp)
         }
-        
         continueIteration = documents.Next(&result)
     }
     
@@ -173,6 +182,7 @@ func process(coll *mgo.Collection, sernum string) {
     if err != nil {
         fmt.Printf("Could not iterate through documents: %v\n", err)
     }
+    
     return
 }
 

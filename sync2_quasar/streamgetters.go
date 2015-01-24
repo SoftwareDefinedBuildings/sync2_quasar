@@ -1,0 +1,59 @@
+package main
+
+import "github.com/SoftwareDefinedBuildings/sync2_quasar/parser"
+
+/* These are functions to use for getting values for streams. It's not concise,
+   but it's needed since the data is parsed to structs, which as far as I know
+   can't be subscripted with strings. */
+
+func GetL1Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L1MagAng[index].Mag
+}
+
+func GetL1Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L1MagAng[index].Angle
+}
+
+func GetL2Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L2MagAng[index].Mag
+}
+
+func GetL2Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L2MagAng[index].Angle
+}
+
+func GetL3Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L3MagAng[index].Mag
+}
+
+func GetL3Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.L3MagAng[index].Angle
+}
+
+func GetC1Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C1MagAng[index].Mag
+}
+
+func GetC1Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C1MagAng[index].Angle
+}
+
+func GetC2Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C2MagAng[index].Mag
+}
+
+func GetC2Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C2MagAng[index].Angle
+}
+
+func GetC3Mag(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C3MagAng[index].Mag
+}
+
+func GetC3Ang(index int, obj *parser.Sync_Output) float32 {
+    return obj.Sync_Data.C3MagAng[index].Angle
+}
+
+func GetLockstate(index int, obj *parser.Sync_Output) int32 {
+    return obj.Sync_Data.Lockstate[index]
+}
