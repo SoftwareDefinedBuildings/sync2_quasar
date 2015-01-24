@@ -6,6 +6,7 @@ import (
     "github.com/SoftwareDefinedBuildings/sync2_quasar/parser"
     "net"
     "os"
+    "os/signal"
     "sync"
     "time"
     capnp "github.com/glycerine/go-capnproto"
@@ -35,6 +36,16 @@ func main() {
         fmt.Println("Lock State")
         return
     }
+    
+    var alive bool = true
+    var interrupt = make(chan os.Signal)
+    signal.Notify(interrupt, os.Interrupt)
+    go func() {
+        <-interrupt // block until an interrupt happens
+        fmt.Println("\nDetected ^C. Waiting for scheduled tasks to complete...")
+        alive = false
+    }()
+    
     var serial_number string = args[0]
     var uuids = make([][]byte, NUM_STREAMS)
     var connections = make([]net.Conn, NUM_STREAMS)
@@ -70,7 +81,7 @@ func main() {
     //var parsed []*parser.Sync_Output = parser.ParseSyncOutArray(data)
     //fmt.Println(*parsed[0])
     
-    process_loop(c, serial_number, uuids, connections, sendLocks, recvLocks)
+    process_loop(&alive, c, serial_number, uuids, connections, sendLocks, recvLocks)
     
     session.Close()
 }
@@ -109,7 +120,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 1
+const ytagbase int = 2
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -232,7 +243,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     return
 }
 
-func process_loop(coll *mgo.Collection, sernum string, uuids [][]byte, connections []net.Conn, sendLocks []*sync.Mutex, recvLocks []*sync.Mutex) {
+func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids [][]byte, connections []net.Conn, sendLocks []*sync.Mutex, recvLocks []*sync.Mutex) {
     query := map[string]interface{}{
         "serial_number": sernum,
         "xtag": map[string]bool{
@@ -250,11 +261,11 @@ func process_loop(coll *mgo.Collection, sernum string, uuids [][]byte, connectio
             },
         },
     }
-    for true {
+    for *keepalive {
         fmt.Println("looping")
         process(coll, query, sernum, uuids, connections, sendLocks, recvLocks)
         fmt.Println("sleeping")
         time.Sleep(time.Second)
-        break // for now, we break. We'll eventually remove this.
     }
+    fmt.Println("Terminated process loop")
 }
