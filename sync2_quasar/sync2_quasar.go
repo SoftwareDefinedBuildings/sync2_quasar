@@ -3,7 +3,9 @@ package main
 import (
     "fmt"
     "gopkg.in/mgo.v2"
+    "github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
     "github.com/SoftwareDefinedBuildings/sync2_quasar/parser"
+    "io/ioutil"
     "net"
     "os"
     "os/signal"
@@ -35,6 +37,18 @@ func main() {
         fmt.Println("Lock State")
         return
     }
+    configfile, err := ioutil.ReadFile("upmuconfig.ini")
+    if err != nil {
+        fmt.Printf("Could not read upmuconfig.ini: %v\n", err)
+        return
+    }
+    
+    config, isErr := configparser.ParseConfig(string(configfile))
+    if isErr {
+        fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
+        return
+    }
+    fmt.Println(config)
     
     var alive bool = true // if this were C I'd have to malloc this
     var interrupt = make(chan os.Signal)
