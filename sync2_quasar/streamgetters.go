@@ -54,8 +54,9 @@ func GetC3Ang(index int, obj *parser.Sync_Output) float64 {
     return float64(obj.Sync_Data.C3MagAng[index].Angle)
 }
 
-func GetLockstate(index int, obj *parser.Sync_Output) float64 {
+func GetLockState(index int, obj *parser.Sync_Output) float64 {
     return float64(obj.Sync_Data.Lockstate[index])
 }
 
-var insertGetters [13]func(int, *parser.Sync_Output) float64 = [13]func(int, *parser.Sync_Output) float64{GetL1Mag, GetL1Ang, GetL2Mag, GetL2Ang, GetL3Mag, GetL3Ang, GetC1Mag, GetC1Ang, GetC2Mag, GetC2Ang, GetC3Mag, GetC3Ang, GetLockstate}
+var insertGetters [13]func(int, *parser.Sync_Output) float64 = [13]func(int, *parser.Sync_Output) float64{GetL1Mag, GetL1Ang, GetL2Mag, GetL2Ang, GetL3Mag, GetL3Ang, GetC1Mag, GetC1Ang, GetC2Mag, GetC2Ang, GetC3Mag, GetC3Ang, GetLockState}
+var STREAMS [13]string = [13]string{"L1MAG", "L1ANG", "L2MAG", "L2ANG", "L3MAG", "L3ANG","C1MAG", "C1ANG", "C2MAG", "C2ANG", "C3MAG", "C3ANG", "LSTATE"}

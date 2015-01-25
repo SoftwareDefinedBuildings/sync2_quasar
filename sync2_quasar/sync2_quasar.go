@@ -17,26 +17,6 @@ import (
 )
 
 func main() {
-    if len(os.Args) != 15 {
-        fmt.Println("14 arguments are required.")
-        fmt.Println("The first argument is the serial number of the uPMU we are inserting data for.")
-        fmt.Println("The remaining 13 arguments are the UUIDs of the streams for the uPMUs.")
-        fmt.Println("They must be in the following order:")
-        fmt.Println("L1 Magnitude")
-        fmt.Println("L1 Angle")
-        fmt.Println("L2 Magnitude")
-        fmt.Println("L2 Angle")
-        fmt.Println("L3 Magnitude")
-        fmt.Println("L3 Angle")
-        fmt.Println("C1 Magnitude")
-        fmt.Println("C1 Angle")
-        fmt.Println("C2 Magnitude")
-        fmt.Println("C2 Angle")
-        fmt.Println("C3 Magnitude")
-        fmt.Println("C3 Angle")
-        fmt.Println("Lock State")
-        return
-    }
     configfile, err := ioutil.ReadFile("upmuconfig.ini")
     if err != nil {
         fmt.Printf("Could not read upmuconfig.ini: %v\n", err)
@@ -48,7 +28,6 @@ func main() {
         fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
         return
     }
-    fmt.Println(config)
     
     var alive bool = true // if this were C I'd have to malloc this
     var interrupt = make(chan os.Signal)
@@ -63,11 +42,45 @@ func main() {
     
     var complete chan bool = make(chan bool)
     
-    go startProcessLoop(os.Args[1], os.Args[2:], &alive, complete)
+    var num_uPMUs int = 0
+    var temp interface{}
+    var serial string
+    var ok bool
+    var uuids []string = make([]string, NUM_STREAMS)
+    var i int
+    var streamMap map[string]interface{}
+    var ip string
+    var upmuMap map[string]interface{}
     
-    var num_uPMUs int = 1
+    uPMULoop:
+        for ip, temp = range config {
+            upmuMap = temp.(map[string]interface{})
+            temp, ok = upmuMap["%serial_number"]
+            if !ok {
+                fmt.Printf("Serial number of uPMU with IP Address %v is not specified. Skipping uPMU...\n", ip)
+                continue
+            }
+            serial = temp.(string)
+            for i = 0; i < NUM_STREAMS; i++ {
+                temp, ok = upmuMap[STREAMS[i]]
+                if !ok {
+                    fmt.Printf("uPMU with serial number %v is missing the stream %v. Skipping uPMU...\n", serial, STREAMS[i])
+                    continue uPMULoop
+                }
+                streamMap = temp.(map[string]interface{})
+                temp, ok = streamMap["uuid"]
+                if !ok {
+                    fmt.Printf("UUID is missing for stream %v of uPMU with serial number %v. Skipping uPMU...\n", STREAMS[i], serial)
+                    continue uPMULoop
+                }
+                uuids[i] = temp.(string)
+            }
+            fmt.Printf("Starting process loop of uPMU with serial number %v\n", serial)
+            go startProcessLoop(serial, uuids, &alive, complete)
+            num_uPMUs++
+        }
     
-    for i := 0; i < num_uPMUs; i++ {
+    for i = 0; i < num_uPMUs; i++ {
         <-complete // block the main thread until all the goroutines say they're done
     }
 }
