@@ -48,6 +48,7 @@ func main() {
     var num_uPMUs int = 0
     var temp interface{}
     var serial string
+    var alias string
     var ok bool
     var uuids []string = make([]string, NUM_STREAMS)
     var i int
@@ -64,22 +65,28 @@ func main() {
                 continue
             }
             serial = temp.(string)
+            temp, ok = upmuMap["%alias"]
+            if ok {
+                alias = temp.(string)
+            } else {
+                alias = serial
+            }
             for i = 0; i < NUM_STREAMS; i++ {
                 temp, ok = upmuMap[STREAMS[i]]
                 if !ok {
-                    fmt.Printf("uPMU with serial number %v is missing the stream %v. Skipping uPMU...\n", serial, STREAMS[i])
+                    fmt.Printf("uPMU %v is missing the stream %v. Skipping uPMU...\n", alias, STREAMS[i])
                     continue uPMULoop
                 }
                 streamMap = temp.(map[string]interface{})
                 temp, ok = streamMap["uuid"]
                 if !ok {
-                    fmt.Printf("UUID is missing for stream %v of uPMU with serial number %v. Skipping uPMU...\n", STREAMS[i], serial)
+                    fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", STREAMS[i], alias)
                     continue uPMULoop
                 }
                 uuids[i] = temp.(string)
             }
-            fmt.Printf("Starting process loop of uPMU with serial number %v\n", serial)
-            go startProcessLoop(serial, uuids, &alive, complete)
+            fmt.Printf("Starting process loop of uPMU %v\n", alias)
+            go startProcessLoop(serial, alias, uuids, &alive, complete)
             num_uPMUs++
         }
     
@@ -88,7 +95,7 @@ func main() {
     }
 }
 
-func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
+func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
     var uuids = make([][]byte, NUM_STREAMS)
     
     var i int
@@ -108,24 +115,24 @@ func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *boo
     
     session, err := mgo.Dial("localhost:27017")
     if err != nil {
-        fmt.Printf("Error connecting to mongo database of received files: %v\n", err)
+        fmt.Printf("Error connecting to mongo database of received files for %v: %v\n", alias, err)
         err = connection.Close()
         if err != nil {
-            fmt.Printf("Could not close connection to QUASAR for %v\n", err)
+            fmt.Printf("Could not close connection to QUASAR for %v: %v\n", alias, err)
         }
         finishSig <- false
         return
     }
     c := session.DB("upmu_database").C("received_files")
     
-    process_loop(alivePtr, c, serial_number, uuids, connection, sendLock, recvLock)
+    process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock)
     
     session.Close()
     err = connection.Close()
     if err == nil {
-        fmt.Printf("Finished closing connection for %v\n", serial_number)
+        fmt.Printf("Finished closing connection for %v\n", alias)
     } else {
-        fmt.Printf("Could not close connection for %v\n", serial_number)
+        fmt.Printf("Could not close connection for %v: %v\n", alias, err)
     }
     finishSig <- true
 }
@@ -164,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 4
+const ytagbase int = 5
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -221,7 +228,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
     return
 }
 
-func process(coll *mgo.Collection, query map[string]interface{}, sernum string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
+func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
     var documents *mgo.Iter = coll.Find(query).Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
@@ -247,7 +254,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             timeArr = synco.Sync_Data.Times
             if timeArr[0] < 2010 || timeArr[0] > 2020 {
                 // if the year is outside of this range things must have gotten corrupted somehow
-                fmt.Printf("Rejecting bad date record for %v: year is %v\n", sernum, timeArr[0])
+                fmt.Printf("Rejecting bad date record for %v: year is %v\n", alias, timeArr[0])
                 continue
             }
             timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
@@ -257,7 +264,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
         }
         for j = 0; j < NUM_STREAMS; j++ {
             if <-feedback == 1 {
-                fmt.Printf("Warning: data for a stream could not be sent for uPMU %v\n", sernum)
+                fmt.Printf("Warning: data for a stream could not be sent for uPMU %v\n", alias)
                 success = false
             }
         }
@@ -271,7 +278,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             })
     
             if err != nil {
-                fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", sernum, err)
+                fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
             }
         }
         continueIteration = documents.Next(&result)
@@ -279,13 +286,13 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     
     err = documents.Err()
     if err != nil {
-        fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", sernum, err)
+        fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", alias, err)
     }
     
     return
 }
 
-func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
+func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
     query := map[string]interface{}{
         "serial_number": sernum,
         "xtag": map[string]bool{
@@ -304,10 +311,10 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids []
         },
     }
     for *keepalive {
-        fmt.Printf("looping %v\n", sernum)
-        process(coll, query, sernum, uuids, connection, sendLock, recvLock)
-        fmt.Printf("sleeping %v\n", sernum)
+        fmt.Printf("looping %v\n", alias)
+        process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock)
+        fmt.Printf("sleeping %v\n", alias)
         time.Sleep(time.Second)
     }
-    fmt.Printf("Terminated process loop for %v\n", sernum)
+    fmt.Printf("Terminated process loop for %v\n", alias)
 }
