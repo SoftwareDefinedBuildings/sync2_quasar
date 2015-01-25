@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 5
+const ytagbase int = 9
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -228,7 +228,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
     return
 }
 
-func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
+func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
     var documents *mgo.Iter = coll.Find(query).Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
@@ -281,7 +281,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                 fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
             }
         }
-        continueIteration = documents.Next(&result)
+        continueIteration = documents.Next(&result) && *alive
     }
     
     err = documents.Err()
@@ -312,7 +312,7 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias st
     }
     for *keepalive {
         fmt.Printf("looping %v\n", alias)
-        process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock)
+        process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock, keepalive)
         fmt.Printf("sleeping %v\n", alias)
         time.Sleep(time.Second)
     }
