@@ -9,6 +9,7 @@ import (
     "net"
     "os"
     "os/signal"
+    "runtime"
     "sync"
     "time"
     capnp "github.com/glycerine/go-capnproto"
@@ -28,6 +29,8 @@ func main() {
         fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
         return
     }
+    
+    runtime.GOMAXPROCS(runtime.NumCPU())
     
     var alive bool = true // if this were C I'd have to malloc this
     var interrupt = make(chan os.Signal)
@@ -98,7 +101,7 @@ func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *boo
     
     connection, err := net.Dial("tcp", DB_ADDR)
     if err != nil {
-        fmt.Printf("Error connecting to the database: %v\n", err)
+        fmt.Printf("Error connecting to the QUASAR database: %v\n", err)
         finishSig <- false
         return
     }
@@ -106,19 +109,14 @@ func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *boo
     session, err := mgo.Dial("localhost:27017")
     if err != nil {
         fmt.Printf("Error connecting to mongo database of received files: %v\n", err)
+        err = connection.Close()
+        if err != nil {
+            fmt.Printf("Could not close connection to QUASAR for %v\n", err)
+        }
         finishSig <- false
         return
     }
     c := session.DB("upmu_database").C("received_files")
-    //res := make(map[string]interface{})
-    //err2 := c.Find(make(map[string]interface{})).One(&res)
-    //fmt.Println(err)
-    //fmt.Println(err2)
-    //fmt.Printf("%T\n", res["data"])
-    
-    //var data []uint8 = res["data"].([]uint8)
-    //var parsed []*parser.Sync_Output = parser.ParseSyncOutArray(data)
-    //fmt.Println(*parsed[0])
     
     process_loop(alivePtr, c, serial_number, uuids, connection, sendLock, recvLock)
     
@@ -166,7 +164,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 2
+const ytagbase int = 3
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
