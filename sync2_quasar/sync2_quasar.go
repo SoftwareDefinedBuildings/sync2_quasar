@@ -15,8 +15,7 @@ import (
 )
 
 func main() {
-    args := os.Args[1:]
-    if len(args) != 14 {
+    if len(os.Args) != 15 {
         fmt.Println("14 arguments are required.")
         fmt.Println("The first argument is the serial number of the uPMU we are inserting data for.")
         fmt.Println("The remaining 13 arguments are the UUIDs of the streams for the uPMUs.")
@@ -37,16 +36,25 @@ func main() {
         return
     }
     
-    var alive bool = true
+    var alive bool = true // if this were C I'd have to malloc this
     var interrupt = make(chan os.Signal)
     signal.Notify(interrupt, os.Interrupt)
     go func() {
-        <-interrupt // block until an interrupt happens
-        fmt.Println("\nDetected ^C. Waiting for scheduled tasks to complete...")
-        alive = false
+        for {
+            <-interrupt // block until an interrupt happens
+            fmt.Println("\nDetected ^C. Waiting for pending tasks to complete...")
+            alive = false
+        }
     }()
     
-    var serial_number string = args[0]
+    var complete chan bool = make(chan bool)
+    
+    go startProcessLoop(os.Args[1], os.Args[2:], &alive, complete)
+    
+    <-complete // block the main thread until all the goroutines say they're done
+}
+
+func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
     var uuids = make([][]byte, NUM_STREAMS)
     var connections = make([]net.Conn, NUM_STREAMS)
     var sendLocks = make([]*sync.Mutex, NUM_STREAMS)
@@ -55,7 +63,7 @@ func main() {
     var i int
     
     for i = 0; i < NUM_STREAMS; i++ {
-        uuids[i] = uuid.Parse(args[i + 1])
+        uuids[i] = uuid.Parse(uuid_strings[i])
         sendLocks[i] = &sync.Mutex{}
         recvLocks[i] = &sync.Mutex{}
     }
@@ -65,11 +73,17 @@ func main() {
         connections[i], err = net.Dial("tcp", DB_ADDR)
         if err != nil {
             fmt.Printf("Error connecting to the database: %v\n", err)
+            finishSig <- false
             return
         }
     }
     
     session, err := mgo.Dial("localhost:27017")
+    if err != nil {
+        fmt.Printf("Error connecting to mongo database of received files: %v\n", err)
+        finishSig <- false
+        return
+    }
     c := session.DB("upmu_database").C("received_files")
     //res := make(map[string]interface{})
     //err2 := c.Find(make(map[string]interface{})).One(&res)
@@ -81,9 +95,17 @@ func main() {
     //var parsed []*parser.Sync_Output = parser.ParseSyncOutArray(data)
     //fmt.Println(*parsed[0])
     
-    process_loop(&alive, c, serial_number, uuids, connections, sendLocks, recvLocks)
+    process_loop(alivePtr, c, serial_number, uuids, connections, sendLocks, recvLocks)
     
     session.Close()
+    for i = 0; i < NUM_STREAMS; i++ {
+        err = connections[i].Close()
+        if err != nil {
+            fmt.Printf("Could not close connection for %v\n", serial_number)
+        }
+    }
+    fmt.Printf("Finished closing connections for %v\n", serial_number)
+    finishSig <- true
 }
 
 // 120 points in each sync_output
@@ -262,10 +284,10 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids []
         },
     }
     for *keepalive {
-        fmt.Println("looping")
+        fmt.Printf("looping %v\n", sernum)
         process(coll, query, sernum, uuids, connections, sendLocks, recvLocks)
-        fmt.Println("sleeping")
+        fmt.Printf("sleeping %v\n", sernum)
         time.Sleep(time.Second)
     }
-    fmt.Println("Terminated process loop")
+    fmt.Printf("Terminated process loop for %v\n", sernum)
 }
