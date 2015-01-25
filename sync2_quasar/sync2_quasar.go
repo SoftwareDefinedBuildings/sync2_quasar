@@ -51,31 +51,29 @@ func main() {
     
     go startProcessLoop(os.Args[1], os.Args[2:], &alive, complete)
     
-    <-complete // block the main thread until all the goroutines say they're done
+    var num_uPMUs int = 1
+    
+    for i := 0; i < num_uPMUs; i++ {
+        <-complete // block the main thread until all the goroutines say they're done
+    }
 }
 
 func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
     var uuids = make([][]byte, NUM_STREAMS)
-    var connections = make([]net.Conn, NUM_STREAMS)
-    var sendLocks = make([]*sync.Mutex, NUM_STREAMS)
-    var recvLocks = make([]*sync.Mutex, NUM_STREAMS)
     
     var i int
     
     for i = 0; i < NUM_STREAMS; i++ {
         uuids[i] = uuid.Parse(uuid_strings[i])
-        sendLocks[i] = &sync.Mutex{}
-        recvLocks[i] = &sync.Mutex{}
     }
+    var sendLock *sync.Mutex = &sync.Mutex{}
+    var recvLock *sync.Mutex = &sync.Mutex{}
     
-    var err error
-    for i = 0; i < NUM_STREAMS; i++ {
-        connections[i], err = net.Dial("tcp", DB_ADDR)
-        if err != nil {
-            fmt.Printf("Error connecting to the database: %v\n", err)
-            finishSig <- false
-            return
-        }
+    connection, err := net.Dial("tcp", DB_ADDR)
+    if err != nil {
+        fmt.Printf("Error connecting to the database: %v\n", err)
+        finishSig <- false
+        return
     }
     
     session, err := mgo.Dial("localhost:27017")
@@ -95,16 +93,15 @@ func startProcessLoop(serial_number string, uuid_strings []string, alivePtr *boo
     //var parsed []*parser.Sync_Output = parser.ParseSyncOutArray(data)
     //fmt.Println(*parsed[0])
     
-    process_loop(alivePtr, c, serial_number, uuids, connections, sendLocks, recvLocks)
+    process_loop(alivePtr, c, serial_number, uuids, connection, sendLock, recvLock)
     
     session.Close()
-    for i = 0; i < NUM_STREAMS; i++ {
-        err = connections[i].Close()
-        if err != nil {
-            fmt.Printf("Could not close connection for %v\n", serial_number)
-        }
+    err = connection.Close()
+    if err == nil {
+        fmt.Printf("Finished closing connection for %v\n", serial_number)
+    } else {
+        fmt.Printf("Could not close connection for %v\n", serial_number)
     }
-    fmt.Printf("Finished closing connections for %v\n", serial_number)
     finishSig <- true
 }
 
@@ -199,7 +196,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
     return
 }
 
-func process(coll *mgo.Collection, query map[string]interface{}, sernum string, uuids [][]byte, connections []net.Conn, sendLocks []*sync.Mutex, recvLocks []*sync.Mutex) {
+func process(coll *mgo.Collection, query map[string]interface{}, sernum string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
     var documents *mgo.Iter = coll.Find(query).Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
@@ -232,7 +229,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
             fmt.Printf("timestamp: %v\n", timestamp)
             for j = 0; j < NUM_STREAMS; j++ {
-                go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connections[j], sendLocks[j], recvLocks[j], feedback)
+                go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connection, sendLock, recvLock, feedback)
             }
         }
         for j = 0; j < NUM_STREAMS; j++ {
@@ -265,7 +262,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     return
 }
 
-func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids [][]byte, connections []net.Conn, sendLocks []*sync.Mutex, recvLocks []*sync.Mutex) {
+func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
     query := map[string]interface{}{
         "serial_number": sernum,
         "xtag": map[string]bool{
@@ -285,7 +282,7 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, uuids []
     }
     for *keepalive {
         fmt.Printf("looping %v\n", sernum)
-        process(coll, query, sernum, uuids, connections, sendLocks, recvLocks)
+        process(coll, query, sernum, uuids, connection, sendLock, recvLock)
         fmt.Printf("sleeping %v\n", sernum)
         time.Sleep(time.Second)
     }
