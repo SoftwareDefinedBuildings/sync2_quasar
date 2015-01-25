@@ -164,7 +164,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 3
+const ytagbase int = 4
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -245,21 +245,19 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
         for i = 0; i < len(parsed); i++ {
             synco = parsed[i]
             timeArr = synco.Sync_Data.Times
-            fmt.Printf("time: %v\n", timeArr)
             if timeArr[0] < 2010 || timeArr[0] > 2020 {
                 // if the year is outside of this range things must have gotten corrupted somehow
-                fmt.Printf("Rejecting bad date record: year is %v\n", timeArr[0])
+                fmt.Printf("Rejecting bad date record for %v: year is %v\n", sernum, timeArr[0])
                 continue
             }
             timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
-            fmt.Printf("timestamp: %v\n", timestamp)
             for j = 0; j < NUM_STREAMS; j++ {
                 go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connection, sendLock, recvLock, feedback)
             }
         }
         for j = 0; j < NUM_STREAMS; j++ {
             if <-feedback == 1 {
-                fmt.Println("Warning: data for a stream could not be sent")
+                fmt.Printf("Warning: data for a stream could not be sent for uPMU %v\n", sernum)
                 success = false
             }
         }
@@ -273,7 +271,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             })
     
             if err != nil {
-                fmt.Printf("Could not update ytag: %v\n", err)
+                fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", sernum, err)
             }
         }
         continueIteration = documents.Next(&result)
@@ -281,7 +279,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     
     err = documents.Err()
     if err != nil {
-        fmt.Printf("Could not iterate through documents: %v\n", err)
+        fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", sernum, err)
     }
     
     return
