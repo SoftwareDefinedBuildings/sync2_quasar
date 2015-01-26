@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 9
+const ytagbase int = 10
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -208,7 +208,6 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
         feedback <- 1
         return
     }
-    feedback <- 0
     
     recvLock.Lock()
     responseSegment, respErr := capnp.ReadFromStream(connection, nil)
@@ -216,6 +215,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 	
 	if respErr != nil {
 		fmt.Printf("Error in receiving response: %v\n", respErr)
+		feedback <- 1
 		return
 	}
 	
@@ -223,6 +223,9 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 	status := response.StatusCode()
 	if status != cpint.STATUSCODE_OK {
 		fmt.Printf("Quasar returns status code %s!\n", status)
+		feedback <- 1
+	} else {
+	    feedback <- 0
 	}
 	
     return
