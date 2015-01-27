@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 10
+const ytagbase int = 11
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -250,7 +250,6 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     
     for continueIteration {
         success = true
-        feedback = make(chan int)
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
             synco = parsed[i]
@@ -261,16 +260,18 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                 continue
             }
             timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
+            feedback = make(chan int)
             for j = 0; j < NUM_STREAMS; j++ {
                 go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connection, sendLock, recvLock, feedback)
             }
-        }
-        for j = 0; j < NUM_STREAMS; j++ {
-            if <-feedback == 1 {
-                fmt.Printf("Warning: data for a stream could not be sent for uPMU %v\n", alias)
-                success = false
+            for j = 0; j < NUM_STREAMS; j++ {
+                if <-feedback == 1 {
+                    fmt.Printf("Warning: data for a stream could not be sent for uPMU %v (serial=%v)\n", alias, sernum)
+                    success = false
+                }
             }
         }
+        fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
         if success {
             err = coll.Update(map[string]interface{}{
                 "_id": result["_id"],
