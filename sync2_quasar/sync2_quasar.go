@@ -50,7 +50,7 @@ func main() {
     var serial string
     var alias string
     var ok bool
-    var uuids []string = make([]string, NUM_STREAMS)
+    var uuids []string
     var i int
     var streamMap map[string]interface{}
     var ip string
@@ -58,6 +58,7 @@ func main() {
     
     uPMULoop:
         for ip, temp = range config {
+            uuids = make([]string, NUM_STREAMS)
             upmuMap = temp.(map[string]interface{})
             temp, ok = upmuMap["%serial_number"]
             if !ok {
