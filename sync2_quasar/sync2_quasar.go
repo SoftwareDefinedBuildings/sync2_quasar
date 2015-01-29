@@ -232,7 +232,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 }
 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
-    var timestamps map[int64]string = make(map[int64]string)
+    var timestamps map[int64]interface{} = make(map[int64]interface{})
     
     var documents *mgo.Iter = coll.Find(query).Iter()
     
@@ -267,7 +267,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                 fmt.Printf("%v and %v have the same timestamp!\n", id, result["_id"])
                 success = false
             } else {
-                timestamps[timestamp] = result["_id"].(string)
+                timestamps[timestamp] = result["_id"]
             }
             /*feedback = make(chan int)
             for j = 0; j < NUM_STREAMS; j++ {
