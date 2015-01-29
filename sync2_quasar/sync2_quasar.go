@@ -124,6 +124,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
         return
     }
     session.SetSyncTimeout(0)
+    session.SetSocketTimeout(24 * time.Hour)
     c := session.DB("upmu_database").C("received_files")
     
     process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock)
@@ -293,7 +294,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             break
         }
         continueIteration = documents.Next(&result)
-        if documents.Timeout() {
+        if !continueIteration && documents.Timeout() {
             continueIteration = documents.Next(&result)
         }
     }
