@@ -284,6 +284,9 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             if err != nil {
                 fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
             }
+        } else {
+            fmt.Println("Document insert fails. Terminating program...")
+            *alive = false
         }
         continueIteration = documents.Next(&result) && *alive
     }
