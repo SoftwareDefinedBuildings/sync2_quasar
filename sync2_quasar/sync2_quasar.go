@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 11
+const ytagbase int = 25
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -232,7 +232,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 }
 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
-    var documents *mgo.Iter = coll.Find(query).Iter()
+    var documents *mgo.Iter = coll.Find(query).Snapshot().Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
     
@@ -249,11 +249,6 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     var err error
     
     for continueIteration {
-        if result["ytag"].(int) >= ytagbase {
-            fmt.Println("Skipping document that was already processed")
-            continueIteration = documents.Next(&result) && *alive
-            continue
-        }
         success = true
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
