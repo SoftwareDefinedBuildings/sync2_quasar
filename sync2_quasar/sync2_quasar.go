@@ -289,15 +289,20 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             fmt.Println("Document insert fails. Terminating program...")
             *alive = false
         }
-        
-        continueIteration = documents.Next(&result) && *alive
+        if !(*alive) {
+            break
+        }
+        continueIteration = documents.Next(&result)
+        if documents.Timeout() {
+            continueIteration = documents.Next(&result)
+        }
     }
     
     err = documents.Err()
     if err != nil {
         fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", alias, err)
     }
-
+    
     return
 }
 
