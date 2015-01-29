@@ -249,6 +249,11 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     var err error
     
     for continueIteration {
+        if result["ytag"].(int) >= ytagbase {
+            fmt.Println("Skipping document that was already processed")
+            continueIteration = documents.Next(&result) && *alive
+            continue
+        }
         success = true
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
