@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 11
+const ytagbase int = 12
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -232,6 +232,8 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 }
 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
+    var timestamps map[int64]string = make(map[int64]string)
+    
     var documents *mgo.Iter = coll.Find(query).Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
@@ -242,9 +244,9 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     var synco *parser.Sync_Output
     var timeArr [6]int32
     var i int
-    var j int
+    //var j int
     var timestamp int64
-    var feedback chan int
+    //var feedback chan int
     var success bool
     var err error
     
@@ -260,7 +262,14 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                 continue
             }
             timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
-            feedback = make(chan int)
+            id, ok := timestamps[timestamp]
+            if ok {
+                fmt.Printf("%v and %v have the same timestamp!\n", id, result["_id"])
+                success = false
+            } else {
+                timestamps[timestamp] = result["_id"].(string)
+            }
+            /*feedback = make(chan int)
             for j = 0; j < NUM_STREAMS; j++ {
                 go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connection, sendLock, recvLock, feedback)
             }
@@ -269,7 +278,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                     fmt.Printf("Warning: data for a stream could not be sent for uPMU %v (serial=%v)\n", alias, sernum)
                     success = false
                 }
-            }
+            }*/
         }
         fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
         if success {
