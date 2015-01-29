@@ -123,6 +123,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
         finishSig <- false
         return
     }
+    session.SetSyncTimeout(0)
     c := session.DB("upmu_database").C("received_files")
     
     process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock)
@@ -288,6 +289,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
             fmt.Println("Document insert fails. Terminating program...")
             *alive = false
         }
+        
         continueIteration = documents.Next(&result) && *alive
     }
     
@@ -295,7 +297,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     if err != nil {
         fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", alias, err)
     }
-    
+
     return
 }
 
