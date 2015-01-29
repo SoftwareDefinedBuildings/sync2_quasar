@@ -14,7 +14,7 @@ import (
     "time"
     capnp "github.com/glycerine/go-capnproto"
     cpint "github.com/SoftwareDefinedBuildings/quasar/cpinterface"
-	uuid "code.google.com/p/go-uuid/uuid"
+    uuid "code.google.com/p/go-uuid/uuid"
 )
 
 func main() {
@@ -171,7 +171,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 12
+const ytagbase int = 23
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -234,7 +234,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
     var timestamps map[int64]interface{} = make(map[int64]interface{})
     
-    var documents *mgo.Iter = coll.Find(query).Iter()
+    var documents *mgo.Iter = coll.Find(query).Snapshot().Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
     
@@ -251,11 +251,6 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     var err error
     
     for continueIteration {
-        if result["ytag"].(int) >= ytagbase {
-            fmt.Println("Skipping document that was already processed")
-            continueIteration = documents.Next(&result) && *alive
-            continue
-        }
         success = true
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
@@ -285,7 +280,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
                 }
             }*/
         }
-        fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
+        //fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
         if success {
             err = coll.Update(map[string]interface{}{
                 "_id": result["_id"],
