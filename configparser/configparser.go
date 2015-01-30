@@ -25,7 +25,7 @@ func parseLevel(lines []string, index int, currLevel int) (map[string]interface{
     var tempErr bool
     for index < numlines {
         line = lines[index]
-        if len(line) == 0 {
+        if len(line) == 0 || line[0] == '#' {
             index++
             continue
         }
