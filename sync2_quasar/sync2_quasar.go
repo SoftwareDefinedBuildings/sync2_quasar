@@ -10,6 +10,7 @@ import (
     "os"
     "os/signal"
     "runtime"
+    "strconv"
     "sync"
     "time"
     capnp "github.com/glycerine/go-capnproto"
@@ -27,6 +28,18 @@ func main() {
     config, isErr := configparser.ParseConfig(string(configfile))
     if isErr {
         fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
+        return
+    }
+    
+    configfile, err = ioutil.ReadFile("syncconfig.ini")
+    if err != nil {
+        fmt.Printf("Could not read syncconfig.ini: %v\n", err)
+        return
+    }
+    
+    syncconfig, isErr := configparser.ParseConfig(string(configfile))
+    if isErr {
+        fmt.Println("There were errors while parsing syncconfig.ini. See above.")
         return
     }
     
@@ -55,6 +68,26 @@ func main() {
     var streamMap map[string]interface{}
     var ip string
     var upmuMap map[string]interface{}
+    var regex string
+    var ytagstr interface{}
+    var ytagnum int64
+    
+    ytagstr, ok = syncconfig["ytagbase"]
+    if ok {
+        ytagnum, err = strconv.ParseInt(ytagstr.(string), 0, 32)
+        if err != nil {
+            fmt.Println("ytagbase must be an integer")
+        } else {
+            ytagbase = int(ytagnum)
+        }
+    } else {
+        fmt.Println("Configuration file does not specify ytagbase. Defaulting to 0.")
+    }
+    regex, ok = syncconfig["name_regex"].(string)
+    if !ok {
+        fmt.Println("Configuration file does not specify name_regex. Defaulting to the empty string.")
+        regex = ""
+    }
     
     uPMULoop:
         for ip, temp = range config {
@@ -87,7 +120,7 @@ func main() {
                 uuids[i] = temp.(string)
             }
             fmt.Printf("Starting process loop of uPMU %v\n", alias)
-            go startProcessLoop(serial, alias, uuids, &alive, complete)
+            go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
             num_uPMUs++
         }
     
@@ -96,7 +129,7 @@ func main() {
     }
 }
 
-func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
+func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
     var uuids = make([][]byte, NUM_STREAMS)
     
     var i int
@@ -128,7 +161,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
     session.SetSocketTimeout(24 * time.Hour)
     c := session.DB("upmu_database").C("received_files")
     
-    process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock)
+    process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock, nameRegex)
     
     session.Close()
     err = connection.Close()
@@ -174,7 +207,7 @@ var insertPool sync.Pool = sync.Pool{
 	},
 }
 
-const ytagbase int = 25
+var ytagbase int = 0
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
     var mp InsertMessagePart = insertPool.Get().(InsertMessagePart)
@@ -308,7 +341,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     return
 }
 
-func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex) {
+func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, nameRegex string) {
     query := map[string]interface{}{
         "serial_number": sernum,
         "xtag": map[string]bool{
@@ -325,6 +358,11 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias st
                 },
             },
         },
+    }
+    if nameRegex != "" {
+        query["name"] = map[string]interface{}{
+            "$regex": nameRegex,
+        }
     }
     for *keepalive {
         fmt.Printf("looping %v\n", alias)
