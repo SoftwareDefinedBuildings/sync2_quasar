@@ -268,7 +268,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 }
 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
-    var documents *mgo.Iter = coll.Find(query).Snapshot().Iter()
+    var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
     
