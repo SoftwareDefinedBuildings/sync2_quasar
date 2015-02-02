@@ -368,14 +368,17 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias st
             "$regex": nameRegex,
         }
     }
+    var i int
     for *keepalive {
         fmt.Printf("looping %v\n", alias)
         if process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock, keepalive) {
             fmt.Printf("sleeping %v\n", alias)
             time.Sleep(time.Second)
         } else {
-            fmt.Printf("No documents found for %v. Waiting 60 seconds...\n", alias)
-            time.Sleep(time.Minute)
+            fmt.Printf("No documents found for %v. Waiting 100 seconds...\n", alias)
+            for i = 0; i < 100 && *keepalive; i++ {
+                time.Sleep(time.Second)
+            }
         }
     }
     fmt.Printf("Terminated process loop for %v\n", alias)
