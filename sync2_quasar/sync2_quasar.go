@@ -267,7 +267,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
     return
 }
 
-func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) {
+func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) bool {
     var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
     
     var result map[string]interface{} = make(map[string]interface{})
@@ -284,7 +284,11 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
     var success bool
     var err error
     
+    var documentsFound bool = false
+    
     for continueIteration {
+        documentsFound = true
+        
         success = true
         parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
         for i = 0; i < len(parsed); i++ {
@@ -338,7 +342,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
         fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", alias, err)
     }
     
-    return
+    return documentsFound
 }
 
 func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, nameRegex string) {
@@ -366,9 +370,13 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias st
     }
     for *keepalive {
         fmt.Printf("looping %v\n", alias)
-        process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock, keepalive)
-        fmt.Printf("sleeping %v\n", alias)
-        time.Sleep(time.Second)
+        if process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock, keepalive) {
+            fmt.Printf("sleeping %v\n", alias)
+            time.Sleep(time.Second)
+        } else {
+            fmt.Printf("No documents found for %v. Waiting 60 seconds...\n", alias)
+            time.Sleep(time.Minute)
+        }
     }
     fmt.Printf("Terminated process loop for %v\n", alias)
 }
