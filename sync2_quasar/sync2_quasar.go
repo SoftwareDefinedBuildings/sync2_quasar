@@ -103,6 +103,8 @@ func main() {
 	
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	
+	poolMap = make(map[int]*sync.Pool)
+	
 	var alive bool = true // if this were C I'd have to malloc this
 	var interrupt = make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt)
@@ -232,8 +234,9 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 }
 
 func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
-	var timeDelta float32 = output.Sync_Data.SampleRate
-	var numPoints int = int((1000.0 / timeDelta) + 0.5)
+	var sampleRate float32 = output.Sync_Data.SampleRate
+	var numPoints int = int((1000.0 / sampleRate) + 0.5)
+	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
 	
 	var pool *sync.Pool = getPool(numPoints)
 	
@@ -251,7 +254,7 @@ func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, 
 	insert.SetUuid(uuid)
 	
 	for i := 0; i < numPoints; i++ {
-		record.SetTime(startTime + int64((float32(i) * timeDelta) + 0.5))
+		record.SetTime(startTime + int64((float64(i) * timeDelta) + 0.5))
 		record.SetValue(getValue(i, output))
 		pointerList.Set(i, capnp.Object(record))
 	}
