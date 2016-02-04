@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 	capnp "github.com/glycerine/go-capnproto"
-	cpint "github.com/SoftwareDefinedBuildings/quasar/cpinterface"
-	uuid "code.google.com/p/go-uuid/uuid"
+	cpint "github.com/SoftwareDefinedBuildings/btrdb/cpinterface"
+	uuid "github.com/pborman/uuid"
 )
 
 
