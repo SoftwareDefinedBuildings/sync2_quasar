@@ -6,41 +6,41 @@ import (
 	"io"
 )
 
-type upmu_vector struct {
-	phase_in_degrees float32
-	fundamental_magnitude_volts float32
+type Upmu_vector struct {
+	Phase_in_degrees float32
+	Fundamental_magnitude_volts float32
 } // 8 bytes
 
-type upmu_one_second_set struct {
-	sample_interval_in_milliseconds float32
-	timestamp [6]int32
-	status [120]int32
-	l1_e_vector_space [120]upmu_vector
-	l2_e_vector_space [120]upmu_vector
-	l3_e_vector_space [120]upmu_vector
-	c1_e_vector_space [120]upmu_vector
-	c2_e_vector_space [120]upmu_vector
-	c3_e_vector_space [120]upmu_vector
+type Upmu_one_second_set struct {
+	Sample_interval_in_milliseconds float32
+	Timestamp [6]int32
+	Status [120]int32
+	L1_e_vector_space [120]Upmu_vector
+	L2_e_vector_space [120]Upmu_vector
+	L3_e_vector_space [120]Upmu_vector
+	C1_e_vector_space [120]Upmu_vector
+	C2_e_vector_space [120]Upmu_vector
+	C3_e_vector_space [120]Upmu_vector
 } // 6268 bytes
 
-type upmu_one_second_expansion_set_one struct {
-	fundamental_watts_total [120]float32
-	fundamental_var_total [120]float32
-	fundamental_va_total [120]float32
-	fundamental_dpf_total [120]float32
-	frequency_l1_e_one_second [120]float32
-	frequency_l1_e_c37 [120]float32
+type Upmu_one_second_expansion_set_one struct {
+	Fundamental_watts_total [120]float32
+	Fundamental_var_total [120]float32
+	Fundamental_va_total [120]float32
+	Fundamental_dpf_total [120]float32
+	Frequency_l1_e_one_second [120]float32
+	Frequency_l1_e_c37 [120]float32
 } // 2880 bytes
 
-type upmu_one_second_output_standard struct {
-	data upmu_one_second_set
-	upmu_debug_info_pll [4]uint32 // the actual struct definition says 'umpu'
-	upmu_debug_info_gps [7]float32
+type Upmu_one_second_output_standard struct {
+	Data Upmu_one_second_set
+	Upmu_debug_info_pll [4]uint32 // the actual struct definition says 'umpu'
+	Upmu_debug_info_gps [7]float32
 } // 6312 bytes
 
-type upmu_one_second_output_expansion_set_one struct {
-    basic_data upmu_one_second_output_standard
-    expansion_set_one upmu_one_second_expansion_set_one
+type Upmu_one_second_output_expansion_set_one struct {
+    Basic_data Upmu_one_second_output_standard
+    Expansion_set_one Upmu_one_second_expansion_set_one
 } // 9192 bytes
 
 const UPMU_ONE_SECOND_OUTPUT_STANDARD_SIZE int = 6312
@@ -54,8 +54,8 @@ const (
 )
 
 type Sync_Output struct {
-	version Sync_Output_Type
-	data upmu_one_second_output_expansion_set_one
+	Version Sync_Output_Type
+	Data Upmu_one_second_output_expansion_set_one
 }
 
 type decoder struct {
@@ -89,13 +89,13 @@ func parse_sync_output(d *decoder) *Sync_Output {
 	var output *Sync_Output = &Sync_Output{}
 	var newversion bool = false
 	
-	err := binary.Read(d, binary.LittleEndian, output.data.basic_data)
+	err := binary.Read(d, binary.LittleEndian, &output.Data.Basic_data)
 	if err != nil {
 		fmt.Printf("Error parsing sync_output: %v\n", err)
 		return nil
 	}
 	
-	for _, status := range output.data.basic_data.data.status {
+	for _, status := range output.Data.Basic_data.Data.Status {
 		if status & 0xe0 != 0 {
 			newversion = true
 			break
@@ -103,14 +103,14 @@ func parse_sync_output(d *decoder) *Sync_Output {
 	}
 	
 	if newversion {
-		output.version = EXPANSION_SET_ONE
-		err = binary.Read(d, binary.LittleEndian, output.data.expansion_set_one)
+		output.Version = EXPANSION_SET_ONE
+		err = binary.Read(d, binary.LittleEndian, &output.Data.Expansion_set_one)
 		if err != nil {
 			fmt.Printf("Error parsing sync_output: %v\n", err)
 			return nil
 		}
 	} else {
-		output.version = OUTPUT_STANDARD
+		output.Version = OUTPUT_STANDARD
 	}
 	
 	return output
@@ -121,7 +121,7 @@ func ParseSyncOutArray(data []byte) []*Sync_Output {
 	var numSyncOutputs int = dataLen / UPMU_ONE_SECOND_OUTPUT_STANDARD_SIZE
 	
 	var dec *decoder = &decoder{index: 0, data: data}
-	var outputs = make([]*Sync_Output, numSyncOutputs, numSyncOutputs)
+	var outputs = make([]*Sync_Output, 0, numSyncOutputs)
 	
 	for !dec.finished() {
 		outputs = append(outputs, parse_sync_output(dec))
@@ -135,97 +135,97 @@ func ParseSyncOutArray(data []byte) []*Sync_Output {
    can't be subscripted with strings. */
 
 func GetL1Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l1_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.L1_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetL1Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l1_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.L1_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetL2Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l2_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.L2_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetL2Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l2_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.L2_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetL3Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l3_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.L3_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetL3Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.l3_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.L3_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetC1Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c1_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.C1_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetC1Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c1_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.C1_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetC2Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c2_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.C2_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetC2Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c2_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.C2_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetC3Mag(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c3_e_vector_space[index].fundamental_magnitude_volts)
+	return float64(obj.Data.Basic_data.Data.C3_e_vector_space[index].Fundamental_magnitude_volts)
 }
 
 func GetC3Ang(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.c3_e_vector_space[index].phase_in_degrees)
+	return float64(obj.Data.Basic_data.Data.C3_e_vector_space[index].Phase_in_degrees)
 }
 
 func GetLockState(index int, obj *Sync_Output) float64 {
-	return float64(obj.data.basic_data.data.status[index] & 0x1f) // keep bits 0 to 4
+	return float64(obj.Data.Basic_data.Data.Status[index] & 0x1f) // keep bits 0 to 4
 }
 
 func GetFundW(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.fundamental_watts_total[index])
+	return float64(obj.Data.Expansion_set_one.Fundamental_watts_total[index])
 }
 
 func GetFundVar(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.fundamental_var_total[index])
+	return float64(obj.Data.Expansion_set_one.Fundamental_var_total[index])
 }
 
 func GetFundVA(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.fundamental_va_total[index])
+	return float64(obj.Data.Expansion_set_one.Fundamental_va_total[index])
 }
 
 func GetFundDPF(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.fundamental_dpf_total[index])
+	return float64(obj.Data.Expansion_set_one.Fundamental_dpf_total[index])
 }
 
 func GetFreqL11S(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.frequency_l1_e_one_second[index]) + 60.0
+	return float64(obj.Data.Expansion_set_one.Frequency_l1_e_one_second[index]) + 60.0
 }
 
 func GetFreqL1C37(index int, obj *Sync_Output) float64 {
-	if (obj.version < EXPANSION_SET_ONE) {
+	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.data.expansion_set_one.frequency_l1_e_c37[index])
+	return float64(obj.Data.Expansion_set_one.Frequency_l1_e_c37[index])
 }
 
 type InsertGetter func(int, *Sync_Output) float64
@@ -234,19 +234,19 @@ var STREAMS [19]string = [19]string{"L1MAG", "L1ANG", "L2MAG", "L2ANG", "L3MAG",
 
 func (s *Sync_Output) GetInsertGetters() []InsertGetter {
 	var getters = make([]InsertGetter, 0, len(STREAMS))
-	if (s.version >= OUTPUT_STANDARD) {
+	if (s.Version >= OUTPUT_STANDARD) {
 		getters = append(getters, GetL1Mag, GetL1Ang, GetL2Mag, GetL2Ang, GetL3Mag, GetL3Ang, GetC1Mag, GetC1Ang, GetC2Mag, GetC2Ang, GetC3Mag, GetC3Ang, GetLockState)
 	}
-	if (s.version >= EXPANSION_SET_ONE) {
+	if (s.Version >= EXPANSION_SET_ONE) {
 		getters = append(getters, GetFundW, GetFundVar, GetFundVA, GetFundDPF, GetFreqL11S, GetFreqL1C37)
 	}
 	return getters
 }
 
 func (s *Sync_Output) SampleRate() float32 {
-	return s.data.basic_data.data.sample_interval_in_milliseconds
+	return s.Data.Basic_data.Data.Sample_interval_in_milliseconds
 }
 
 func (s *Sync_Output) Times() [6]int32 {
-	return s.data.basic_data.data.timestamp
+	return s.Data.Basic_data.Data.Timestamp
 }
