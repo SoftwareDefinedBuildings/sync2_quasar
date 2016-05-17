@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"gopkg.in/mgo.v2"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
-	"github.com/SoftwareDefinedBuildings/sync2_quasar/parser"
 	"io/ioutil"
 	"net"
 	"os"
@@ -151,7 +150,7 @@ func main() {
 	
 	uPMULoop:
 		for ip, temp = range config {
-			uuids = make([]string, NUM_STREAMS)
+			uuids = make([]string, len(STREAMS))
 			upmuMap = temp.(map[string]interface{})
 			temp, ok = upmuMap["%serial_number"]
 			if !ok {
@@ -165,11 +164,10 @@ func main() {
 			} else {
 				alias = serial
 			}
-			for i = 0; i < NUM_STREAMS; i++ {
+			for i = 0; i < len(STREAMS); i++ {
 				temp, ok = upmuMap[STREAMS[i]]
 				if !ok {
-					fmt.Printf("uPMU %v is missing the stream %v. Skipping uPMU...\n", alias, STREAMS[i])
-					continue uPMULoop
+					break
 				}
 				streamMap = temp.(map[string]interface{})
 				temp, ok = streamMap["uuid"]
@@ -233,8 +231,8 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	finishSig <- true
 }
 
-func insert_stream(uuid []byte, output *parser.Sync_Output, getValue func (int, *parser.Sync_Output) float64, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
-	var sampleRate float32 = output.Sync_Data.SampleRate
+func insert_stream(uuid []byte, output *Sync_Output, getValue InsertGetter, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
+	var sampleRate float32 = output.SampleRate()
 	var numPoints int = int((1000.0 / sampleRate) + 0.5)
 	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
 	
@@ -303,15 +301,18 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	
 	var continueIteration bool = documents.Next(&result)
 	
-	var parsed []*parser.Sync_Output
-	var synco *parser.Sync_Output
+	var parsed []*Sync_Output
+	var synco *Sync_Output
 	var timeArr [6]int32
 	var i int
 	var j int
+	var numsent int
 	var timestamp int64
 	var feedback chan int
 	var success bool
 	var err error
+	var igs []InsertGetter
+	var ig InsertGetter
 	
 	var documentsFound bool = false
 	
@@ -319,28 +320,37 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		documentsFound = true
 		
 		success = true
-		parsed = parser.ParseSyncOutArray(result["data"].([]uint8))
+		parsed = ParseSyncOutArray(result["data"].([]uint8))
+		feedback = make(chan int)
+		numsent = 0
 		for i = 0; i < len(parsed); i++ {
 			synco = parsed[i]
-			timeArr = synco.Sync_Data.Times
+			timeArr = synco.Times()
 			if timeArr[0] < 2010 || timeArr[0] > 2020 {
 				// if the year is outside of this range things must have gotten corrupted somehow
 				fmt.Printf("Rejecting bad date record for %v: year is %v\n", alias, timeArr[0])
 				continue
 			}
 			timestamp = time.Date(int(timeArr[0]), time.Month(timeArr[1]), int(timeArr[2]), int(timeArr[3]), int(timeArr[4]), int(timeArr[5]), 0, time.UTC).UnixNano()
-			feedback = make(chan int)
-			for j = 0; j < NUM_STREAMS; j++ {
-				go insert_stream(uuids[j], synco, insertGetters[j], timestamp, connection, sendLock, recvLock, feedback)
-			}
-			for j = 0; j < NUM_STREAMS; j++ {
-				if <-feedback == 1 {
-					fmt.Printf("Warning: data for a stream could not be sent for uPMU %v (serial=%v)\n", alias, sernum)
+			igs = synco.GetInsertGetters()
+			for j, ig = range igs {
+				if j >= len(uuids) {
+					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream", STREAMS[j])
 					success = false
+					continue
 				}
+				go insert_stream(uuids[j], synco, ig, timestamp, connection, sendLock, recvLock, feedback)
+				numsent++
+			}
+		}
+		for j = 0; j < numsent; j++ {
+			if <-feedback == 1 {
+				fmt.Printf("Warning: data for a stream could not be sent for uPMU %v (serial=%v)\n", alias, sernum)
+				success = false
 			}
 		}
 		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
+		
 		if success {
 			err = coll.Update(map[string]interface{}{
 				"_id": result["_id"],
