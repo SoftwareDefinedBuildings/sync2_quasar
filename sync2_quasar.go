@@ -19,7 +19,6 @@ import (
 
 
 const DB_ADDR string = "localhost:4410"
-const NUM_STREAMS int = 13
 
 var poolMap map[int]*sync.Pool
 var poolLock sync.RWMutex = sync.RWMutex{}
@@ -150,7 +149,7 @@ func main() {
 	
 	uPMULoop:
 		for ip, temp = range config {
-			uuids = make([]string, len(STREAMS))
+			uuids = make([]string, 0, len(STREAMS))
 			upmuMap = temp.(map[string]interface{})
 			temp, ok = upmuMap["%serial_number"]
 			if !ok {
@@ -175,7 +174,7 @@ func main() {
 					fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", STREAMS[i], alias)
 					continue uPMULoop
 				}
-				uuids[i] = temp.(string)
+				uuids = append(uuids, temp.(string))
 			}
 			fmt.Printf("Starting process loop of uPMU %v\n", alias)
 			go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
@@ -188,11 +187,11 @@ func main() {
 }
 
 func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
-	var uuids = make([][]byte, NUM_STREAMS)
+	var uuids = make([][]byte, len(uuid_strings))
 	
 	var i int
 	
-	for i = 0; i < NUM_STREAMS; i++ {
+	for i = 0; i < len(uuids); i++ {
 		uuids[i] = uuid.Parse(uuid_strings[i])
 	}
 	var sendLock *sync.Mutex = &sync.Mutex{}
@@ -335,7 +334,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			igs = synco.GetInsertGetters()
 			for j, ig = range igs {
 				if j >= len(uuids) {
-					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream", STREAMS[j])
+					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream\n", STREAMS[j])
 					success = false
 					continue
 				}
