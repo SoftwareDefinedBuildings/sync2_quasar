@@ -300,6 +300,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	
 	var continueIteration bool = documents.Next(&result)
 	
+	var rawdata []uint8
 	var parsed []*Sync_Output
 	var synco *Sync_Output
 	var timeArr [6]int32
@@ -319,13 +320,28 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		documentsFound = true
 		
 		success = true
-		parsed = ParseSyncOutArray(result["data"].([]uint8))
+		rawdata = result["data"].([]uint8)
+		parsed = ParseSyncOutArray(rawdata)
 		feedback = make(chan int)
 		numsent = 0
 		for i = 0; i < len(parsed); i++ {
 			synco = parsed[i]
 			if synco == nil {
-				fmt.Println("Could not parse set at index %d in file %s from uPMU %s (serial=%s)\n", i, result["name"].(string), alias, sernum)
+				var file *os.File
+				fmt.Printf("Could not parse set at index %d in file %s from uPMU %s (serial=%s)\n", i, result["name"].(string), alias, sernum)
+				fmt.Println("Dumping bad file into error.dat...")
+				file, err = os.OpenFile("error.dat", os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0660)
+				if err == nil {
+					_, err = file.Write(rawdata)
+				}
+				if err == nil {
+					err = file.Close()
+				}
+				if err == nil {
+					fmt.Println("Finished writing file.")
+				} else {
+					fmt.Printf("Could not dump bad file: %v\n", err)
+				}
 				os.Exit(1)
 			}
 			timeArr = synco.Times()
