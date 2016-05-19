@@ -91,7 +91,7 @@ func parse_sync_output(d *decoder) *Sync_Output {
 	
 	err := binary.Read(d, binary.LittleEndian, &output.Data.Basic_data)
 	if err != nil {
-		fmt.Printf("Error parsing sync_output: %v\n", err)
+		fmt.Printf("Error parsing sync_output (basic data): %v\n", err)
 		return nil
 	}
 	
@@ -106,7 +106,7 @@ func parse_sync_output(d *decoder) *Sync_Output {
 		output.Version = EXPANSION_SET_ONE
 		err = binary.Read(d, binary.LittleEndian, &output.Data.Expansion_set_one)
 		if err != nil {
-			fmt.Printf("Error parsing sync_output: %v\n", err)
+			fmt.Printf("Error parsing sync_output (expansion set one): %v\n", err)
 			return nil
 		}
 	} else {

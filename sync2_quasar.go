@@ -324,6 +324,10 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		numsent = 0
 		for i = 0; i < len(parsed); i++ {
 			synco = parsed[i]
+			if synco == nil {
+				fmt.Println("Could not parse set at index %d in file %s from uPMU %s (serial=%s)\n", i, result["name"].(string), alias, sernum)
+				os.Exit(1)
+			}
 			timeArr = synco.Times()
 			if timeArr[0] < 2010 || timeArr[0] > 2020 {
 				// if the year is outside of this range things must have gotten corrupted somehow
