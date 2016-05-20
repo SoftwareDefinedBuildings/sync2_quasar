@@ -360,8 +360,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			igs = synco.GetInsertGetters()
 			for j, ig = range igs {
 				if j >= len(uuids) {
-					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream\n", STREAMS[j])
-					success = false
+					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream. Dropping data for that stream...\n", STREAMS[j])
 					continue
 				}
 				go insert_stream(uuids[j], synco, ig, timestamp, connection, sendLock, recvLock, feedback)
