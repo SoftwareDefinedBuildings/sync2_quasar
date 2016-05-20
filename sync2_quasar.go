@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gopkg.in/mgo.v2"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -321,28 +322,33 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		
 		success = true
 		rawdata = result["data"].([]uint8)
-		parsed = ParseSyncOutArray(rawdata)
+		parsed, err = ParseSyncOutArray(rawdata)
 		feedback = make(chan int)
 		numsent = 0
 		for i = 0; i < len(parsed); i++ {
 			synco = parsed[i]
 			if synco == nil {
 				var file *os.File
-				fmt.Printf("Could not parse set at index %d in file %s from uPMU %s (serial=%s)\n", i, result["name"].(string), alias, sernum)
-				fmt.Println("Dumping bad file into error.dat...")
-				file, err = os.OpenFile("error.dat", os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0660)
-				if err == nil {
-					_, err = file.Write(rawdata)
-				}
-				if err == nil {
-					err = file.Close()
-				}
-				if err == nil {
-					fmt.Println("Finished writing file.")
+				fmt.Printf("Could not parse set at index %d in file %s from uPMU %s (serial=%s). Reason: %v\n", i, result["name"].(string), alias, sernum, err)
+				if err == io.ErrUnexpectedEOF {
+					fmt.Println("Warning: skipping partially written/corrupt set...")
+					continue
 				} else {
-					fmt.Printf("Could not dump bad file: %v\n", err)
+					fmt.Println("Dumping bad file into error.dat...")
+					file, err = os.OpenFile("error.dat", os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0660)
+					if err == nil {
+						_, err = file.Write(rawdata)
+					}
+					if err == nil {
+						err = file.Close()
+					}
+					if err == nil {
+						fmt.Println("Finished writing file.")
+					} else {
+						fmt.Printf("Could not dump bad file: %v\n", err)
+					}
+					os.Exit(1)
 				}
-				os.Exit(1)
 			}
 			timeArr = synco.Times()
 			if timeArr[0] < 2010 || timeArr[0] > 2020 {

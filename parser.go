@@ -85,14 +85,14 @@ func (d *decoder) finished() bool {
 	return d.index == len(d.data)
 }
 
-func parse_sync_output(d *decoder) *Sync_Output {
+func parse_sync_output(d *decoder) (*Sync_Output, error) {
 	var output *Sync_Output = &Sync_Output{}
 	var newversion bool = false
 	
 	err := binary.Read(d, binary.LittleEndian, &output.Data.Basic_data)
 	if err != nil {
 		fmt.Printf("Error parsing sync_output (basic data): %v\n", err)
-		return nil
+		return nil, err
 	}
 	
 	for _, status := range output.Data.Basic_data.Data.Status {
@@ -107,27 +107,30 @@ func parse_sync_output(d *decoder) *Sync_Output {
 		err = binary.Read(d, binary.LittleEndian, &output.Data.Expansion_set_one)
 		if err != nil {
 			fmt.Printf("Error parsing sync_output (expansion set one): %v\n", err)
-			return nil
+			return nil, err
 		}
 	} else {
 		output.Version = OUTPUT_STANDARD
 	}
 	
-	return output
+	return output, nil
 }
 
-func ParseSyncOutArray(data []byte) []*Sync_Output {
+func ParseSyncOutArray(data []byte) ([]*Sync_Output, error) {
 	var dataLen int = len(data)
 	var numSyncOutputs int = dataLen / UPMU_ONE_SECOND_OUTPUT_STANDARD_SIZE
 	
 	var dec *decoder = &decoder{index: 0, data: data}
+	var output *Sync_Output
 	var outputs = make([]*Sync_Output, 0, numSyncOutputs)
+	var err error = nil
 	
-	for !dec.finished() {
-		outputs = append(outputs, parse_sync_output(dec))
+	for !dec.finished() && err == nil {
+		output, err = parse_sync_output(dec)
+		outputs = append(outputs, output)
 	}
 	
-	return outputs
+	return outputs, err
 }
 
 /* These are functions to use for getting values for streams. It's not concise,
