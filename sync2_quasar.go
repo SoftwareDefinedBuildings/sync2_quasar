@@ -416,9 +416,6 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, nameRegex string) {
 	query := map[string]interface{}{
 		"serial_number": sernum,
-		"xtag": map[string]bool{
-			"$exists": false,
-		},
 		"$or": [2]map[string]interface{}{
 			map[string]interface{}{
 				"ytag": map[string]int{
