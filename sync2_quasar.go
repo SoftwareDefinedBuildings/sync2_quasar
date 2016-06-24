@@ -18,9 +18,6 @@ import (
 	uuid "github.com/pborman/uuid"
 )
 
-
-const DB_ADDR string = "localhost:4410"
-
 var poolMap map[int]*sync.Pool
 var poolLock sync.RWMutex = sync.RWMutex{}
 
@@ -197,15 +194,22 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	}
 	var sendLock *sync.Mutex = &sync.Mutex{}
 	var recvLock *sync.Mutex = &sync.Mutex{}
-	
-	connection, err := net.Dial("tcp", DB_ADDR)
+	db_addr := os.Getenv("BTRDB_ADDR")
+	if db_addr == "" {
+		db_addr = "localhost:4410"
+	}
+	mgo_addr := os.Getenv("MONGO_ADDR")
+	if mgo_addr == "" {
+		mgo_addr = "localhost:27017"
+	}
+	connection, err := net.Dial("tcp", db_addr)
 	if err != nil {
 		fmt.Printf("Error connecting to the QUASAR database: %v\n", err)
 		finishSig <- false
 		return
 	}
 	
-	session, err := mgo.Dial("localhost:27017")
+	session, err := mgo.Dial(mgo_addr)
 	if err != nil {
 		fmt.Printf("Error connecting to mongo database of received files for %v: %v\n", alias, err)
 		err = connection.Close()
