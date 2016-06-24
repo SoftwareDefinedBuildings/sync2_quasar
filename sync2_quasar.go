@@ -223,6 +223,18 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	session.SetSocketTimeout(24 * time.Hour)
 	c := session.DB("upmu_database").C("received_files")
 
+	fmt.Println("Verifying that index exists...")
+	err = c.EnsureIndex(mgo.Index{
+		Key: []string{ "serial_number", "ytag", "name" },
+	})
+
+	if err != nil {
+		fmt.Printf("Could not built index on Mongo database: %v\nTerminating program...", err)
+		*alivePtr = false
+		finishSig <- false
+		return
+	}
+
 	process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock, nameRegex)
 
 	session.Close()
