@@ -230,7 +230,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 
 	if err != nil {
 		err = c.EnsureIndex(mgo.Index{
-			Key: []string{ "name" },
+			Key: []string{ "serial_number", "name" },
 		})
 	}
 
