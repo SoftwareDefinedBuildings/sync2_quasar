@@ -211,7 +211,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 
 	session, err := mgo.Dial(mgo_addr)
 	if err != nil {
-		fmt.Printf("Error connecting to mongo database of received files for %v: %v\n", alias, err)
+		fmt.Printf("Error connecting to Mongo database of received files for %v: %v\n", alias, err)
 		err = connection.Close()
 		if err != nil {
 			fmt.Printf("Could not close connection to QUASAR for %v: %v\n", alias, err)
@@ -223,13 +223,19 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	session.SetSocketTimeout(24 * time.Hour)
 	c := session.DB("upmu_database").C("received_files")
 
-	fmt.Println("Verifying that index exists...")
+	fmt.Println("Verifying that database indices exist...")
 	err = c.EnsureIndex(mgo.Index{
 		Key: []string{ "serial_number", "ytag", "name" },
 	})
 
 	if err != nil {
-		fmt.Printf("Could not built index on Mongo database: %v\nTerminating program...", err)
+		err = c.EnsureIndex(mgo.Index{
+			Key: []string{ "name" },
+		})
+	}
+
+	if err != nil {
+		fmt.Printf("Could not build indices on Mongo database: %v\nTerminating program...", err)
 		*alivePtr = false
 		finishSig <- false
 		return
@@ -392,6 +398,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
 
 		if success {
+			fmt.Println("Updating ytag for %v for uPMU %v (serial=%v)", result["name"], alias, sernum)
 			err = coll.Update(map[string]interface{}{
 				"_id": result["_id"],
 			}, map[string]interface{}{
@@ -400,7 +407,9 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 				},
 			})
 
-			if err != nil {
+			if err == nil {
+				fmt.Println("Successfully updated ytag for %v for uPMU %v (serial=%v)", result["name"], alias, sernum)
+			} else {
 				fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
 			}
 		} else {
