@@ -33,11 +33,11 @@ type InsertMessagePart struct {
 func getPool(recordListSize int) *sync.Pool {
 	var pool *sync.Pool
 	var ok bool
-	
+
 	poolLock.RLock()
 	pool, ok = poolMap[recordListSize]
 	poolLock.RUnlock()
-	
+
 	if !ok {
 		poolLock.Lock()
 		pool, ok = poolMap[recordListSize]
@@ -66,7 +66,7 @@ func getPool(recordListSize int) *sync.Pool {
 		}
 		poolLock.Unlock()
 	}
-	
+
 	return pool
 }
 
@@ -78,29 +78,29 @@ func main() {
 		fmt.Printf("Could not read upmuconfig.ini: %v\n", err)
 		return
 	}
-	
+
 	config, isErr := configparser.ParseConfig(string(configfile))
 	if isErr {
 		fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
 		return
 	}
-	
+
 	configfile, err = ioutil.ReadFile("syncconfig.ini")
 	if err != nil {
 		fmt.Printf("Could not read syncconfig.ini: %v\n", err)
 		return
 	}
-	
+
 	syncconfig, isErr := configparser.ParseConfig(string(configfile))
 	if isErr {
 		fmt.Println("There were errors while parsing syncconfig.ini. See above.")
 		return
 	}
-	
+
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	
+
 	poolMap = make(map[int]*sync.Pool)
-	
+
 	var alive bool = true // if this were C I'd have to malloc this
 	var interrupt = make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt)
@@ -111,9 +111,9 @@ func main() {
 			alive = false
 		}
 	}()
-	
+
 	var complete chan bool = make(chan bool)
-	
+
 	var num_uPMUs int = 0
 	var temp interface{}
 	var serial string
@@ -127,7 +127,7 @@ func main() {
 	var regex string
 	var ytagstr interface{}
 	var ytagnum int64
-	
+
 	ytagstr, ok = syncconfig["ytagbase"]
 	if ok {
 		ytagnum, err = strconv.ParseInt(ytagstr.(string), 0, 32)
@@ -144,7 +144,7 @@ func main() {
 		fmt.Println("Configuration file does not specify name_regex. Defaulting to the empty string.")
 		regex = ""
 	}
-	
+
 	uPMULoop:
 		for ip, temp = range config {
 			uuids = make([]string, 0, len(STREAMS))
@@ -178,7 +178,7 @@ func main() {
 			go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
 			num_uPMUs++
 		}
-	
+
 	for i = 0; i < num_uPMUs; i++ {
 		<-complete // block the main thread until all the goroutines say they're done
 	}
@@ -186,9 +186,9 @@ func main() {
 
 func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
 	var uuids = make([][]byte, len(uuid_strings))
-	
+
 	var i int
-	
+
 	for i = 0; i < len(uuids); i++ {
 		uuids[i] = uuid.Parse(uuid_strings[i])
 	}
@@ -208,7 +208,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 		finishSig <- false
 		return
 	}
-	
+
 	session, err := mgo.Dial(mgo_addr)
 	if err != nil {
 		fmt.Printf("Error connecting to mongo database of received files for %v: %v\n", alias, err)
@@ -222,9 +222,9 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	session.SetSyncTimeout(0)
 	session.SetSocketTimeout(24 * time.Hour)
 	c := session.DB("upmu_database").C("received_files")
-	
+
 	process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock, nameRegex)
-	
+
 	session.Close()
 	err = connection.Close()
 	if err == nil {
@@ -239,22 +239,22 @@ func insert_stream(uuid []byte, output *Sync_Output, getValue InsertGetter, star
 	var sampleRate float32 = output.SampleRate()
 	var numPoints int = int((1000.0 / sampleRate) + 0.5)
 	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
-	
+
 	var pool *sync.Pool = getPool(numPoints)
-	
+
 	var mp InsertMessagePart = pool.Get().(InsertMessagePart)
-	
+
 	segment := mp.segment
 	request := *mp.request
 	insert := *mp.insert
 	recordList := *mp.recordList
 	pointerList := *mp.pointerList
 	record := *mp.record
-	
+
 	request.SetEchoTag(0)
-	
+
 	insert.SetUuid(uuid)
-	
+
 	for i := 0; i < numPoints; i++ {
 		record.SetTime(startTime + int64((float64(i) * timeDelta) + 0.5))
 		record.SetValue(getValue(i, output))
@@ -262,30 +262,30 @@ func insert_stream(uuid []byte, output *Sync_Output, getValue InsertGetter, star
 	}
 	insert.SetValues(recordList)
 	request.SetInsertValues(insert)
-	
+
 	var sendErr error
 	sendLock.Lock()
 	_, sendErr = segment.WriteTo(connection)
 	sendLock.Unlock()
-	
+
 	pool.Put(mp)
-	
+
 	if sendErr != nil {
 		fmt.Printf("Error in sending message: %v\n", sendErr)
 		feedback <- 1
 		return
 	}
-	
+
 	recvLock.Lock()
 	responseSegment, respErr := capnp.ReadFromStream(connection, nil)
 	recvLock.Unlock()
-	
+
 	if respErr != nil {
 		fmt.Printf("Error in receiving response: %v\n", respErr)
 		feedback <- 1
 		return
 	}
-	
+
 	response := cpint.ReadRootResponse(responseSegment)
 	status := response.StatusCode()
 	if status != cpint.STATUSCODE_OK {
@@ -294,17 +294,17 @@ func insert_stream(uuid []byte, output *Sync_Output, getValue InsertGetter, star
 	} else {
 		feedback <- 0
 	}
-	
+
 	return
 }
 
 func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) bool {
 	var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
-	
+
 	var result map[string]interface{} = make(map[string]interface{})
-	
+
 	var continueIteration bool = documents.Next(&result)
-	
+
 	var rawdata []uint8
 	var parsed []*Sync_Output
 	var synco *Sync_Output
@@ -318,12 +318,12 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	var err error
 	var igs []InsertGetter
 	var ig InsertGetter
-	
+
 	var documentsFound bool = false
-	
+
 	for continueIteration {
 		documentsFound = true
-		
+
 		success = true
 		rawdata = result["data"].([]uint8)
 		parsed, err = ParseSyncOutArray(rawdata)
@@ -378,7 +378,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			}
 		}
 		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
-		
+
 		if success {
 			err = coll.Update(map[string]interface{}{
 				"_id": result["_id"],
@@ -387,7 +387,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 					"ytag": ytagbase,
 				},
 			})
-	
+
 			if err != nil {
 				fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
 			}
@@ -403,12 +403,13 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			continueIteration = documents.Next(&result)
 		}
 	}
-	
+
 	err = documents.Err()
 	if err != nil {
-		fmt.Printf("Could not iterate through documents for uPMU %v: %v\n", alias, err)
+		fmt.Printf("Could not iterate through documents for uPMU %v: %v\nTerminating program...", alias, err)
+		*alive = false;
 	}
-	
+
 	return documentsFound
 }
 
