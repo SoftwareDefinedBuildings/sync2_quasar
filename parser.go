@@ -186,7 +186,7 @@ func GetC3Ang(index int, obj *Sync_Output) float64 {
 }
 
 func GetLockState(index int, obj *Sync_Output) float64 {
-	return float64(obj.Data.Basic_data.Data.Status[index] & 0x1f) // keep bits 0 to 4
+	return float64(obj.Data.Basic_data.Data.Status[index])
 }
 
 func GetFundW(index int, obj *Sync_Output) float64 {
@@ -221,7 +221,7 @@ func GetFreqL11S(index int, obj *Sync_Output) float64 {
 	if (obj.Version < EXPANSION_SET_ONE) {
 		panic("invalid type for insert getter")
 	}
-	return float64(obj.Data.Expansion_set_one.Frequency_l1_e_one_second[index]) + 60.0
+	return float64(obj.Data.Expansion_set_one.Frequency_l1_e_one_second[index])
 }
 
 func GetFreqL1C37(index int, obj *Sync_Output) float64 {
