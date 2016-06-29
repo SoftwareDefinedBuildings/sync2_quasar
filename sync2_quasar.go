@@ -408,7 +408,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			})
 
 			if err == nil {
-				fmt.Println("Successfully updated ytag for %v for uPMU %v (serial=%v)", result["name"], alias, sernum)
+				fmt.Printf("Successfully updated ytag for %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
 			} else {
 				fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
 			}
