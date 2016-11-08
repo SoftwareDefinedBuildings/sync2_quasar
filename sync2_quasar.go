@@ -182,6 +182,13 @@ func main() {
 	for i = 0; i < num_uPMUs; i++ {
 		<-complete // block the main thread until all the goroutines say they're done
 	}
+
+	if num_uPMUs == 0 {
+		fmt.Println("WARNING: No uPMUs found. Sleeping forever...")
+		for alive {
+			time.Sleep(time.Second)
+		}
+	}
 }
 
 func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
