@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"gopkg.in/mgo.v2"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 	capnp "github.com/glycerine/go-capnproto"
 	cpint "github.com/SoftwareDefinedBuildings/btrdb/cpinterface"
@@ -72,34 +74,62 @@ func getPool(recordListSize int) *sync.Pool {
 
 var ytagbase int = 0
 
-func main() {
-	configfile, err := ioutil.ReadFile("upmuconfig.ini")
+var configfile []byte = nil
+
+func checkConfigFile() bool {
+	var file *os.File
+	var err error
+	file, err = os.Open("upmuconfig.ini")
+	if err != nil {
+		fmt.Printf("Could not open upmuconfig.ini: %v\n", err)
+		os.Exit(1)
+	}
+
+	defer file.Close()
+
+	var fd uintptr = file.Fd()
+
+	// Will block until acquired
+	err = syscall.Flock(int(fd), syscall.LOCK_EX)
+	if err != nil {
+		fmt.Printf("WARNING: could not lock upmuconfig.ini: %v\n", err)
+		return false
+	}
+
+	var filecontents []byte
+	filecontents, err = ioutil.ReadAll(file)
 	if err != nil {
 		fmt.Printf("Could not read upmuconfig.ini: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(filecontents) == 0 {
+		fmt.Println("Configuration file (upmuconfig.ini) is empty!")
+		os.Exit(1)
+	}
+
+	if configfile == nil || !bytes.Equal(filecontents, configfile) {
+		fmt.Printf("Returning TRUE: %v %v\n", configfile == nil, !bytes.Equal(filecontents, configfile))
+		fmt.Println(len(filecontents))
+		fmt.Println(len(configfile))
+		configfile = filecontents
+		return true
+	}
+
+	return false
+}
+
+func main() {
+	var changed bool
+	var err error
+
+	changed = checkConfigFile()
+	if !changed {
+		fmt.Println("Could not read upmuconfig.ini")
 		return
 	}
 
-	config, isErr := configparser.ParseConfig(string(configfile))
-	if isErr {
-		fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
-		return
-	}
-
-	configfile, err = ioutil.ReadFile("syncconfig.ini")
-	if err != nil {
-		fmt.Printf("Could not read syncconfig.ini: %v\n", err)
-		return
-	}
-
-	syncconfig, isErr := configparser.ParseConfig(string(configfile))
-	if isErr {
-		fmt.Println("There were errors while parsing syncconfig.ini. See above.")
-		return
-	}
-
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	poolMap = make(map[int]*sync.Pool)
+	var terminate bool = false
 
 	var alive bool = true // if this were C I'd have to malloc this
 	var interrupt = make(chan os.Signal)
@@ -112,81 +142,127 @@ func main() {
 		}
 	}()
 
-	var complete chan bool = make(chan bool)
+	/* Start over if the configuration file changes */
+	go func() {
+		var changed bool = false
+		for {
+			time.Sleep(15 * time.Second)
+			if checkConfigFile() {
+				changed = true
+			} else if changed {
+				changed = false
+				// start from scratch
+				fmt.Println("Configuration file changed. Restarting...")
+				terminate = false
+				alive = false
+			}
+		}
+	}()
 
-	var num_uPMUs int = 0
-	var temp interface{}
-	var serial string
-	var alias string
-	var ok bool
-	var uuids []string
-	var i int
-	var streamMap map[string]interface{}
-	var ip string
-	var upmuMap map[string]interface{}
-	var regex string
-	var ytagstr interface{}
-	var ytagnum int64
+	for !terminate {
+		// If we die, just terminate (unless this is set differently)
+		alive = true
+		terminate = true
 
-	ytagstr, ok = syncconfig["ytagbase"]
-	if ok {
-		ytagnum, err = strconv.ParseInt(ytagstr.(string), 0, 32)
+		config, isErr := configparser.ParseConfig(string(configfile))
+		if isErr {
+			fmt.Println("There were errors while parsing upmuconfig.ini. See above.")
+			return
+		}
+
+		var syncconfigfile []byte
+		syncconfigfile, err = ioutil.ReadFile("syncconfig.ini")
 		if err != nil {
-			fmt.Println("ytagbase must be an integer")
-		} else {
-			ytagbase = int(ytagnum)
+			fmt.Printf("Could not read syncconfig.ini: %v\n", err)
+			return
 		}
-	} else {
-		fmt.Println("Configuration file does not specify ytagbase. Defaulting to 0.")
-	}
-	regex, ok = syncconfig["name_regex"].(string)
-	if !ok {
-		fmt.Println("Configuration file does not specify name_regex. Defaulting to the empty string.")
-		regex = ""
-	}
 
-	uPMULoop:
-		for ip, temp = range config {
-			uuids = make([]string, 0, len(STREAMS))
-			upmuMap = temp.(map[string]interface{})
-			temp, ok = upmuMap["%serial_number"]
-			if !ok {
-				fmt.Printf("Serial number of uPMU with IP Address %v is not specified. Skipping uPMU...\n", ip)
-				continue
-			}
-			serial = temp.(string)
-			temp, ok = upmuMap["%alias"]
-			if ok {
-				alias = temp.(string)
+		syncconfig, isErr := configparser.ParseConfig(string(syncconfigfile))
+		if isErr {
+			fmt.Println("There were errors while parsing syncconfig.ini. See above.")
+			return
+		}
+
+		runtime.GOMAXPROCS(runtime.NumCPU())
+
+		poolMap = make(map[int]*sync.Pool)
+
+		var complete chan bool = make(chan bool)
+
+		var num_uPMUs int = 0
+		var temp interface{}
+		var serial string
+		var alias string
+		var ok bool
+		var uuids []string
+		var i int
+		var streamMap map[string]interface{}
+		var ip string
+		var upmuMap map[string]interface{}
+		var regex string
+		var ytagstr interface{}
+		var ytagnum int64
+
+		ytagstr, ok = syncconfig["ytagbase"]
+		if ok {
+			ytagnum, err = strconv.ParseInt(ytagstr.(string), 0, 32)
+			if err != nil {
+				fmt.Println("ytagbase must be an integer")
 			} else {
-				alias = serial
+				ytagbase = int(ytagnum)
 			}
-			for i = 0; i < len(STREAMS); i++ {
-				temp, ok = upmuMap[STREAMS[i]]
-				if !ok {
-					break
-				}
-				streamMap = temp.(map[string]interface{})
-				temp, ok = streamMap["uuid"]
-				if !ok {
-					fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", STREAMS[i], alias)
-					continue uPMULoop
-				}
-				uuids = append(uuids, temp.(string))
-			}
-			fmt.Printf("Starting process loop of uPMU %v\n", alias)
-			go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
-			num_uPMUs++
+		} else {
+			fmt.Println("Configuration file does not specify ytagbase. Defaulting to 0.")
+		}
+		regex, ok = syncconfig["name_regex"].(string)
+		if !ok {
+			fmt.Println("Configuration file does not specify name_regex. Defaulting to the empty string.")
+			regex = ""
 		}
 
-	for i = 0; i < num_uPMUs; i++ {
-		<-complete // block the main thread until all the goroutines say they're done
-	}
+		uPMULoop:
+			for ip, temp = range config {
+				uuids = make([]string, 0, len(STREAMS))
+				upmuMap = temp.(map[string]interface{})
+				temp, ok = upmuMap["%serial_number"]
+				if !ok {
+					fmt.Printf("Serial number of uPMU with IP Address %v is not specified. Skipping uPMU...\n", ip)
+					continue
+				}
+				serial = temp.(string)
+				temp, ok = upmuMap["%alias"]
+				if ok {
+					alias = temp.(string)
+				} else {
+					alias = serial
+				}
+				for i = 0; i < len(STREAMS); i++ {
+					temp, ok = upmuMap[STREAMS[i]]
+					if !ok {
+						break
+					}
+					streamMap = temp.(map[string]interface{})
+					temp, ok = streamMap["uuid"]
+					if !ok {
+						fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", STREAMS[i], alias)
+						continue uPMULoop
+					}
+					uuids = append(uuids, temp.(string))
+				}
+				fmt.Printf("Starting process loop of uPMU %v\n", alias)
+				go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
+				num_uPMUs++
+			}
 
-	if num_uPMUs == 0 {
-		fmt.Println("WARNING: No uPMUs found. Sleeping forever...")
-		for alive {
-			time.Sleep(time.Second)
+		for i = 0; i < num_uPMUs; i++ {
+			<-complete // block the main thread until all the goroutines say they're done
+		}
+
+		if num_uPMUs == 0 {
+			fmt.Println("WARNING: No uPMUs found. Sleeping forever...")
+			for alive {
+				time.Sleep(time.Second)
+			}
 		}
 	}
 }
