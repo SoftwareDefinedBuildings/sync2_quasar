@@ -481,7 +481,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
 
 		if success {
-			fmt.Println("Updating ytag for %v for uPMU %v (serial=%v)", result["name"], alias, sernum)
+			fmt.Printf("Updating ytag for %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
 			err = coll.Update(map[string]interface{}{
 				"_id": result["_id"],
 			}, map[string]interface{}{
