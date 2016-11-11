@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gopkg.in/mgo.v2"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
+	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
 	"io"
 	"io/ioutil"
 	"net"
@@ -222,7 +223,7 @@ func main() {
 
 		uPMULoop:
 			for ip, temp = range config {
-				uuids = make([]string, 0, len(STREAMS))
+				uuids = make([]string, 0, len(upmuparser.STREAMS))
 				upmuMap = temp.(map[string]interface{})
 				temp, ok = upmuMap["%serial_number"]
 				if !ok {
@@ -236,15 +237,15 @@ func main() {
 				} else {
 					alias = serial
 				}
-				for i = 0; i < len(STREAMS); i++ {
-					temp, ok = upmuMap[STREAMS[i]]
+				for i = 0; i < len(upmuparser.STREAMS); i++ {
+					temp, ok = upmuMap[upmuparser.STREAMS[i]]
 					if !ok {
 						break
 					}
 					streamMap = temp.(map[string]interface{})
 					temp, ok = streamMap["uuid"]
 					if !ok {
-						fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", STREAMS[i], alias)
+						fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", upmuparser.STREAMS[i], alias)
 						continue uPMULoop
 					}
 					uuids = append(uuids, temp.(string))
@@ -336,7 +337,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	finishSig <- true
 }
 
-func insert_stream(uuid []byte, output *Sync_Output, getValue InsertGetter, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
+func insert_stream(uuid []byte, output *upmuparser.Sync_Output, getValue upmuparser.InsertGetter, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
 	var sampleRate float32 = output.SampleRate()
 	var numPoints int = int((1000.0 / sampleRate) + 0.5)
 	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
@@ -407,8 +408,8 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	var continueIteration bool = documents.Next(&result)
 
 	var rawdata []uint8
-	var parsed []*Sync_Output
-	var synco *Sync_Output
+	var parsed []*upmuparser.Sync_Output
+	var synco *upmuparser.Sync_Output
 	var timeArr [6]int32
 	var i int
 	var j int
@@ -417,8 +418,8 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	var feedback chan int
 	var success bool
 	var err error
-	var igs []InsertGetter
-	var ig InsertGetter
+	var igs []upmuparser.InsertGetter
+	var ig upmuparser.InsertGetter
 
 	var documentsFound bool = false
 
@@ -427,7 +428,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 
 		success = true
 		rawdata = result["data"].([]uint8)
-		parsed, err = ParseSyncOutArray(rawdata)
+		parsed, err = upmuparser.ParseSyncOutArray(rawdata)
 		feedback = make(chan int)
 		numsent = 0
 		for i = 0; i < len(parsed); i++ {
@@ -465,7 +466,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 			igs = synco.GetInsertGetters()
 			for j, ig = range igs {
 				if j >= len(uuids) {
-					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream. Dropping data for that stream...\n", STREAMS[j])
+					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream. Dropping data for that stream...\n", upmuparser.STREAMS[j])
 					continue
 				}
 				go insert_stream(uuids[j], synco, ig, timestamp, connection, sendLock, recvLock, feedback)
