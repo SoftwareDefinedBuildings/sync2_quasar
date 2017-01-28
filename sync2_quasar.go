@@ -20,8 +20,8 @@ import (
 	uuid "github.com/pborman/uuid"
 )
 
+var btrdbconn *btrdb.BTrDB
 var ytagbase int = 0
-
 var configfile []byte = nil
 
 func checkConfigFile() bool {
@@ -57,9 +57,6 @@ func checkConfigFile() bool {
 	}
 
 	if configfile == nil || !bytes.Equal(filecontents, configfile) {
-		fmt.Printf("Returning TRUE: %v %v\n", configfile == nil, !bytes.Equal(filecontents, configfile))
-		fmt.Println(len(filecontents))
-		fmt.Println(len(configfile))
 		configfile = filecontents
 		return true
 	}
@@ -76,6 +73,23 @@ func main() {
 		fmt.Println("Could not read upmuconfig.ini")
 		return
 	}
+
+	ctx := context.Background()
+
+	btrdbconn, err = btrdb.Connect(ctx, btrdb.EndpointsFromEnv()...)
+	if err != nil {
+		fmt.Printf("Error connecting to the QUASAR database: %v\n", err)
+		return
+	}
+
+	defer func() {
+		err := btrdbconn.Disconnect()
+		if err == nil {
+			fmt.Println("Finished closing connection")
+		} else {
+			fmt.Printf("Could not close connection: %v\n", err)
+		}
+	}()
 
 	var terminate bool = false
 
@@ -166,8 +180,6 @@ func main() {
 			regex = ""
 		}
 
-		ctx := context.Background()
-
 		uPMULoop:
 			for ip, temp = range config {
 				uuids = make([]string, 0, len(upmuparser.STREAMS))
@@ -223,28 +235,14 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 	for i = 0; i < len(uuids); i++ {
 		uuids[i] = uuid.Parse(uuid_strings[i])
 	}
-	db_addr := os.Getenv("BTRDB_ADDR")
-	if db_addr == "" {
-		db_addr = "localhost:4410"
-	}
 	mgo_addr := os.Getenv("MONGO_ADDR")
 	if mgo_addr == "" {
 		mgo_addr = "localhost:27017"
-	}
-	bc, err := btrdb.Connect(ctx, btrdb.EndpointsFromEnv()...)
-	if err != nil {
-		fmt.Printf("Error connecting to the QUASAR database: %v\n", err)
-		finishSig <- false
-		return
 	}
 
 	session, err := mgo.Dial(mgo_addr)
 	if err != nil {
 		fmt.Printf("Error connecting to Mongo database of received files for %v: %v\n", alias, err)
-		err = bc.Disconnect()
-		if err != nil {
-			fmt.Printf("Could not close connection to QUASAR for %v: %v\n", alias, err)
-		}
 		finishSig <- false
 		return
 	}
@@ -270,15 +268,9 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 		return
 	}
 
-	process_loop(ctx, alivePtr, c, serial_number, alias, uuids, bc, nameRegex)
+	process_loop(ctx, alivePtr, c, serial_number, alias, uuids, btrdbconn, nameRegex)
 
 	session.Close()
-	err = bc.Disconnect()
-	if err == nil {
-		fmt.Printf("Finished closing connection for %v\n", alias)
-	} else {
-		fmt.Printf("Could not close connection for %v: %v\n", alias, err)
-	}
 	finishSig <- true
 }
 
