@@ -2,76 +2,23 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"gopkg.in/mgo.v2"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
+	"gopkg.in/btrdb.v4"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
-	capnp "github.com/glycerine/go-capnproto"
-	cpint "github.com/SoftwareDefinedBuildings/btrdb/cpinterface"
+
 	uuid "github.com/pborman/uuid"
 )
-
-var poolMap map[int]*sync.Pool
-var poolLock sync.RWMutex = sync.RWMutex{}
-
-type InsertMessagePart struct {
-	segment *capnp.Segment
-	request *cpint.Request
-	insert *cpint.CmdInsertValues
-	recordList *cpint.Record_List
-	pointerList *capnp.PointerList
-	record *cpint.Record
-}
-
-func getPool(recordListSize int) *sync.Pool {
-	var pool *sync.Pool
-	var ok bool
-
-	poolLock.RLock()
-	pool, ok = poolMap[recordListSize]
-	poolLock.RUnlock()
-
-	if !ok {
-		poolLock.Lock()
-		pool, ok = poolMap[recordListSize]
-		if !ok {
-			// Create a new pool
-			pool = &sync.Pool{
-				New: func () interface{} {
-					var seg *capnp.Segment = capnp.NewBuffer(nil)
-					var req cpint.Request = cpint.NewRootRequest(seg)
-					var insert cpint.CmdInsertValues = cpint.NewCmdInsertValues(seg)
-					insert.SetSync(false)
-					var recList cpint.Record_List = cpint.NewRecordList(seg, recordListSize)
-					var pointList capnp.PointerList = capnp.PointerList(recList)
-					var record cpint.Record = cpint.NewRecord(seg)
-					return InsertMessagePart{
-						segment: seg,
-						request: &req,
-						insert: &insert,
-						recordList: &recList,
-						pointerList: &pointList,
-						record: &record,
-					}
-				},
-			}
-			poolMap[recordListSize] = pool
-		}
-		poolLock.Unlock()
-	}
-
-	return pool
-}
 
 var ytagbase int = 0
 
@@ -186,8 +133,6 @@ func main() {
 
 		runtime.GOMAXPROCS(runtime.NumCPU())
 
-		poolMap = make(map[int]*sync.Pool)
-
 		var complete chan bool = make(chan bool)
 
 		var num_uPMUs int = 0
@@ -221,6 +166,8 @@ func main() {
 			regex = ""
 		}
 
+		ctx := context.Background()
+
 		uPMULoop:
 			for ip, temp = range config {
 				uuids = make([]string, 0, len(upmuparser.STREAMS))
@@ -251,7 +198,7 @@ func main() {
 					uuids = append(uuids, temp.(string))
 				}
 				fmt.Printf("Starting process loop of uPMU %v\n", alias)
-				go startProcessLoop(serial, alias, uuids, &alive, complete, regex)
+				go startProcessLoop(ctx, serial, alias, uuids, &alive, complete, regex)
 				num_uPMUs++
 			}
 
@@ -268,16 +215,14 @@ func main() {
 	}
 }
 
-func startProcessLoop(serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
-	var uuids = make([][]byte, len(uuid_strings))
+func startProcessLoop(ctx context.Context, serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
+	var uuids = make([]uuid.UUID, len(uuid_strings))
 
 	var i int
 
 	for i = 0; i < len(uuids); i++ {
 		uuids[i] = uuid.Parse(uuid_strings[i])
 	}
-	var sendLock *sync.Mutex = &sync.Mutex{}
-	var recvLock *sync.Mutex = &sync.Mutex{}
 	db_addr := os.Getenv("BTRDB_ADDR")
 	if db_addr == "" {
 		db_addr = "localhost:4410"
@@ -286,7 +231,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	if mgo_addr == "" {
 		mgo_addr = "localhost:27017"
 	}
-	connection, err := net.Dial("tcp", db_addr)
+	bc, err := btrdb.Connect(ctx, btrdb.EndpointsFromEnv()...)
 	if err != nil {
 		fmt.Printf("Error connecting to the QUASAR database: %v\n", err)
 		finishSig <- false
@@ -296,7 +241,7 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	session, err := mgo.Dial(mgo_addr)
 	if err != nil {
 		fmt.Printf("Error connecting to Mongo database of received files for %v: %v\n", alias, err)
-		err = connection.Close()
+		err = bc.Disconnect()
 		if err != nil {
 			fmt.Printf("Could not close connection to QUASAR for %v: %v\n", alias, err)
 		}
@@ -325,10 +270,10 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 		return
 	}
 
-	process_loop(alivePtr, c, serial_number, alias, uuids, connection, sendLock, recvLock, nameRegex)
+	process_loop(ctx, alivePtr, c, serial_number, alias, uuids, bc, nameRegex)
 
 	session.Close()
-	err = connection.Close()
+	err = bc.Disconnect()
 	if err == nil {
 		fmt.Printf("Finished closing connection for %v\n", alias)
 	} else {
@@ -337,70 +282,29 @@ func startProcessLoop(serial_number string, alias string, uuid_strings []string,
 	finishSig <- true
 }
 
-func insert_stream(uuid []byte, output *upmuparser.Sync_Output, getValue upmuparser.InsertGetter, startTime int64, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, feedback chan int) {
+func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Output, getValue upmuparser.InsertGetter, startTime int64, bc *btrdb.BTrDB, feedback chan int) {
 	var sampleRate float32 = output.SampleRate()
 	var numPoints int = int((1000.0 / sampleRate) + 0.5)
 	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
 
-	var pool *sync.Pool = getPool(numPoints)
+	stream := bc.StreamFromUUID(uu)
 
-	var mp InsertMessagePart = pool.Get().(InsertMessagePart)
-
-	segment := mp.segment
-	request := *mp.request
-	insert := *mp.insert
-	recordList := *mp.recordList
-	pointerList := *mp.pointerList
-	record := *mp.record
-
-	request.SetEchoTag(0)
-
-	insert.SetUuid(uuid)
-
-	for i := 0; i < numPoints; i++ {
-		record.SetTime(startTime + int64((float64(i) * timeDelta) + 0.5))
-		record.SetValue(getValue(i, output))
-		pointerList.Set(i, capnp.Object(record))
-	}
-	insert.SetValues(recordList)
-	request.SetInsertValues(insert)
-
-	var sendErr error
-	sendLock.Lock()
-	_, sendErr = segment.WriteTo(connection)
-	sendLock.Unlock()
-
-	pool.Put(mp)
-
-	if sendErr != nil {
-		fmt.Printf("Error in sending message: %v\n", sendErr)
-		feedback <- 1
-		return
+	points := make([]btrdb.RawPoint, numPoints)
+	for i := 0; i != len(points); i++ {
+		points[i].Time = startTime + int64((float64(i) * timeDelta) + 0.5)
+		points[i].Value = getValue(i, output)
 	}
 
-	recvLock.Lock()
-	responseSegment, respErr := capnp.ReadFromStream(connection, nil)
-	recvLock.Unlock()
-
-	if respErr != nil {
-		fmt.Printf("Error in receiving response: %v\n", respErr)
-		feedback <- 1
-		return
-	}
-
-	response := cpint.ReadRootResponse(responseSegment)
-	status := response.StatusCode()
-	if status != cpint.STATUSCODE_OK {
-		fmt.Printf("Quasar returns status code %s!\n", status)
-		feedback <- 1
-	} else {
+	err := stream.Insert(ctx, points)
+	if err == nil {
 		feedback <- 0
+	} else {
+		fmt.Printf("Error inserting data: %v\n", err)
+		feedback <- 1
 	}
-
-	return
 }
 
-func process(coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, alive *bool) bool {
+func process(ctx context.Context, coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, alive *bool) bool {
 	var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
 
 	var result map[string]interface{} = make(map[string]interface{})
@@ -469,7 +373,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 					fmt.Printf("Warning: data for a stream includes stream %s, but no UUID was provided for that stream. Dropping data for that stream...\n", upmuparser.STREAMS[j])
 					continue
 				}
-				go insert_stream(uuids[j], synco, ig, timestamp, connection, sendLock, recvLock, feedback)
+				go insert_stream(ctx, uuids[j], synco, ig, timestamp, bc, feedback)
 				numsent++
 			}
 		}
@@ -518,7 +422,7 @@ func process(coll *mgo.Collection, query map[string]interface{}, sernum string, 
 	return documentsFound
 }
 
-func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids [][]byte, connection net.Conn, sendLock *sync.Mutex, recvLock *sync.Mutex, nameRegex string) {
+func process_loop(ctx context.Context, keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, nameRegex string) {
 	query := map[string]interface{}{
 		"serial_number": sernum,
 		"$or": [2]map[string]interface{}{
@@ -541,7 +445,7 @@ func process_loop(keepalive *bool, coll *mgo.Collection, sernum string, alias st
 	var i int
 	for *keepalive {
 		fmt.Printf("looping %v\n", alias)
-		if process(coll, query, sernum, alias, uuids, connection, sendLock, recvLock, keepalive) {
+		if process(ctx, coll, query, sernum, alias, uuids, bc, keepalive) {
 			fmt.Printf("sleeping %v\n", alias)
 			time.Sleep(time.Second)
 		} else {
