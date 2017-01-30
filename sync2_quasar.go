@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"gopkg.in/mgo.v2"
+	"github.com/ceph/go-ceph/rados"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
 	"gopkg.in/btrdb.v4"
@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,9 @@ import (
 var btrdbconn *btrdb.BTrDB
 var ytagbase int = 0
 var configfile []byte = nil
+
+const NUM_RHANDLES = 16
+var rhPool chan *rados.IOContext
 
 func checkConfigFile() bool {
 	var file *os.File
@@ -72,6 +76,38 @@ func main() {
 	if !changed {
 		fmt.Println("Could not read upmuconfig.ini")
 		return
+	}
+
+	conn, err := rados.NewConn()
+	if err != nil {
+		fmt.Printf("Could not initialize ceph storage: %v\n", err)
+		return
+	}
+	err = conn.ReadDefaultConfigFile()
+	if err != nil {
+		fmt.Printf("Could not read ceph config: %v\n", err)
+		return
+	}
+	err = conn.Connect()
+	if err != nil {
+		fmt.Printf("Could not initialize ceph storage: %v\n", err)
+		return
+	}
+
+	pool := os.Getenv("RECEIVER_POOL")
+	if pool == "" {
+		pool = "receiver"
+	}
+
+	rhPool = make(chan *rados.IOContext, NUM_RHANDLES+1)
+
+	for j := 0; j != NUM_RHANDLES; j++ {
+		h, err := conn.OpenIOContext(pool)
+		if err != nil {
+			fmt.Printf("Could not open ceph handle: %v", err)
+			return
+		}
+		rhPool <- h
 	}
 
 	ctx := context.Background()
@@ -159,7 +195,6 @@ func main() {
 		var streamMap map[string]interface{}
 		var ip string
 		var upmuMap map[string]interface{}
-		var regex string
 		var ytagstr interface{}
 		var ytagnum int64
 
@@ -173,11 +208,6 @@ func main() {
 			}
 		} else {
 			fmt.Println("Configuration file does not specify ytagbase. Defaulting to 0.")
-		}
-		regex, ok = syncconfig["name_regex"].(string)
-		if !ok {
-			fmt.Println("Configuration file does not specify name_regex. Defaulting to the empty string.")
-			regex = ""
 		}
 
 		uPMULoop:
@@ -210,7 +240,7 @@ func main() {
 					uuids = append(uuids, temp.(string))
 				}
 				fmt.Printf("Starting process loop of uPMU %v\n", alias)
-				go startProcessLoop(ctx, serial, alias, uuids, &alive, complete, regex)
+				go startProcessLoop(ctx, serial, alias, uuids, &alive, complete)
 				num_uPMUs++
 			}
 
@@ -227,7 +257,7 @@ func main() {
 	}
 }
 
-func startProcessLoop(ctx context.Context, serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool, nameRegex string) {
+func startProcessLoop(ctx context.Context, serial_number string, alias string, uuid_strings []string, alivePtr *bool, finishSig chan bool) {
 	var uuids = make([]uuid.UUID, len(uuid_strings))
 
 	var i int
@@ -240,37 +270,9 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 		mgo_addr = "localhost:27017"
 	}
 
-	session, err := mgo.Dial(mgo_addr)
-	if err != nil {
-		fmt.Printf("Error connecting to Mongo database of received files for %v: %v\n", alias, err)
-		finishSig <- false
-		return
-	}
-	session.SetSyncTimeout(0)
-	session.SetSocketTimeout(24 * time.Hour)
-	c := session.DB("upmu_database").C("received_files")
 
-	fmt.Println("Verifying that database indices exist...")
-	err = c.EnsureIndex(mgo.Index{
-		Key: []string{ "serial_number", "ytag", "name" },
-	})
+	process_loop(ctx, alivePtr, serial_number, alias, uuids, btrdbconn)
 
-	if err == nil {
-		err = c.EnsureIndex(mgo.Index{
-			Key: []string{ "serial_number", "name" },
-		})
-	}
-
-	if err != nil {
-		fmt.Printf("Could not build indices on Mongo database: %v\nTerminating program...", err)
-		*alivePtr = false
-		finishSig <- false
-		return
-	}
-
-	process_loop(ctx, alivePtr, c, serial_number, alias, uuids, btrdbconn, nameRegex)
-
-	session.Close()
 	finishSig <- true
 }
 
@@ -296,14 +298,20 @@ func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Ou
 	}
 }
 
-func process(ctx context.Context, coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, alive *bool) bool {
-	var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
+func process(ctx context.Context, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, alive *bool) bool {
+	rh := <-rhPool
+	defer func() { rhPool <- rh }()
+	oid := fmt.Sprintf("meta.gen.%d", ytagbase)
+	prefix := fmt.Sprintf("data.%s", sernum)
+	todo, err := rh.GetOmapValues(oid, "", prefix, 100)
+	if err != nil {
+		fmt.Printf("Could not check for additional files for uPMU %v: %v\nTerminating program...\n", alias, err)
+		*alive = false
+		return false
+	}
 
-	var result map[string]interface{} = make(map[string]interface{})
+	documentsFound := (len(todo) != 0)
 
-	var continueIteration bool = documents.Next(&result)
-
-	var rawdata []uint8
 	var parsed []*upmuparser.Sync_Output
 	var synco *upmuparser.Sync_Output
 	var timeArr [6]int32
@@ -313,17 +321,18 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 	var timestamp int64
 	var feedback chan int
 	var success bool
-	var err error
 	var igs []upmuparser.InsertGetter
 	var ig upmuparser.InsertGetter
 
-	var documentsFound bool = false
-
-	for continueIteration {
-		documentsFound = true
+	for objname, rawdata := range todo {
+		parts := strings.SplitN(objname, ".", 3)
+		if len(parts) != 3 {
+			fmt.Printf("Invalid object name %s\n", parts)
+			continue
+		}
+		filename := parts[2]
 
 		success = true
-		rawdata = result["data"].([]uint8)
 		parsed, err = upmuparser.ParseSyncOutArray(rawdata)
 		feedback = make(chan int)
 		numsent = 0
@@ -331,7 +340,7 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 			synco = parsed[i]
 			if synco == nil {
 				var file *os.File
-				fmt.Printf("Could not parse set at index %d in file %s from uPMU %s (serial=%s). Reason: %v\n", i, result["name"].(string), alias, sernum, err)
+				fmt.Printf("Could not parse set at index %d in file %s from uPMU %s (serial=%s). Reason: %v\n", i, filename, alias, sernum, err)
 				if err == io.ErrUnexpectedEOF {
 					fmt.Println("Warning: skipping partially written/corrupt set...")
 					continue
@@ -375,23 +384,19 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 				success = false
 			}
 		}
-		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
+		fmt.Printf("Finished sending %v for uPMU %v (serial=%v)\n", filename, alias, sernum)
 
 		if success {
-			fmt.Printf("Updating ytag for %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
-			err = coll.Update(map[string]interface{}{
-				"_id": result["_id"],
-			}, map[string]interface{}{
-				"$set": map[string]interface{}{
-					"ytag": ytagbase,
-				},
-			})
+
+			fmt.Printf("Removing %v for uPMU %v (serial=%v) from generation list\n", filename, alias, sernum)
+			rh.RmOmapKeys(oid, []string{objname})
 
 			if err == nil {
-				fmt.Printf("Successfully updated ytag for %v for uPMU %v (serial=%v)\n", result["name"], alias, sernum)
+				fmt.Printf("Successfully updated ytag for %v for uPMU %v (serial=%v)\n", filename, alias, sernum)
 			} else {
 				fmt.Printf("Could not update ytag for a document for uPMU %v: %v\n", alias, err)
 			}
+
 		} else {
 			fmt.Println("Document insert fails. Terminating program...")
 			*alive = false
@@ -399,45 +404,16 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 		if !(*alive) {
 			break
 		}
-		continueIteration = documents.Next(&result)
-		if !continueIteration && documents.Timeout() {
-			continueIteration = documents.Next(&result)
-		}
-	}
-
-	err = documents.Err()
-	if err != nil {
-		fmt.Printf("Could not iterate through documents for uPMU %v: %v\nTerminating program...", alias, err)
-		*alive = false;
 	}
 
 	return documentsFound
 }
 
-func process_loop(ctx context.Context, keepalive *bool, coll *mgo.Collection, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, nameRegex string) {
-	query := map[string]interface{}{
-		"serial_number": sernum,
-		"$or": [2]map[string]interface{}{
-			map[string]interface{}{
-				"ytag": map[string]int{
-					"$lt": ytagbase,
-				 },
-			}, map[string]interface{}{
-				"ytag": map[string]bool{
-					"$exists": false,
-				},
-			},
-		},
-	}
-	if nameRegex != "" {
-		query["name"] = map[string]interface{}{
-			"$regex": nameRegex,
-		}
-	}
+func process_loop(ctx context.Context, keepalive *bool, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB) {
 	var i int
 	for *keepalive {
 		fmt.Printf("looping %v\n", alias)
-		if process(ctx, coll, query, sernum, alias, uuids, bc, keepalive) {
+		if process(ctx, sernum, alias, uuids, bc, keepalive) {
 			fmt.Printf("sleeping %v\n", alias)
 			time.Sleep(time.Second)
 		} else {
