@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"gopkg.in/mgo.v2"
-	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
-	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
-	"gopkg.in/btrdb.v4"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
+	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
+	"gopkg.in/btrdb.v4"
+	"gopkg.in/mgo.v2"
 
 	uuid "github.com/pborman/uuid"
 )
@@ -147,9 +149,9 @@ func main() {
 
 		runtime.GOMAXPROCS(runtime.NumCPU())
 
-		var complete chan bool = make(chan bool)
+		var complete = make(chan bool)
 
-		var num_uPMUs int = 0
+		var num_uPMUs = 0
 		var temp interface{}
 		var serial string
 		var alias string
@@ -180,39 +182,60 @@ func main() {
 			regex = ""
 		}
 
-		uPMULoop:
-			for ip, temp = range config {
-				uuids = make([]string, 0, len(upmuparser.STREAMS))
-				upmuMap = temp.(map[string]interface{})
-				temp, ok = upmuMap["%serial_number"]
-				if !ok {
-					fmt.Printf("Serial number of uPMU with IP Address %v is not specified. Skipping uPMU...\n", ip)
-					continue
-				}
-				serial = temp.(string)
-				temp, ok = upmuMap["%alias"]
-				if ok {
-					alias = temp.(string)
-				} else {
-					alias = serial
-				}
-				for i = 0; i < len(upmuparser.STREAMS); i++ {
-					temp, ok = upmuMap[upmuparser.STREAMS[i]]
-					if !ok {
-						break
-					}
-					streamMap = temp.(map[string]interface{})
-					temp, ok = streamMap["uuid"]
-					if !ok {
-						fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", upmuparser.STREAMS[i], alias)
-						continue uPMULoop
-					}
-					uuids = append(uuids, temp.(string))
-				}
-				fmt.Printf("Starting process loop of uPMU %v\n", alias)
-				go startProcessLoop(ctx, serial, alias, uuids, &alive, complete, regex)
-				num_uPMUs++
+	uPMULoop:
+		for ip, temp = range config {
+			uuids = make([]string, 0, len(upmuparser.STREAMS))
+			upmuMap = temp.(map[string]interface{})
+			temp, ok = upmuMap["%serial_number"]
+			if !ok {
+				fmt.Printf("Serial number of uPMU with IP Address %v is not specified. Skipping uPMU...\n", ip)
+				continue
 			}
+			serial = temp.(string)
+			temp, ok = upmuMap["%alias"]
+			if ok {
+				alias = temp.(string)
+			} else {
+				alias = serial
+			}
+			for i = 0; i < len(upmuparser.STREAMS); i++ {
+				temp, ok = upmuMap[upmuparser.STREAMS[i]]
+				if !ok {
+					break
+				}
+				streamMap = temp.(map[string]interface{})
+				temp, ok = streamMap["uuid"]
+				if !ok {
+					fmt.Printf("UUID is missing for stream %v of uPMU %v. Skipping uPMU...\n", upmuparser.STREAMS[i], alias)
+					continue uPMULoop
+				}
+				uustr := temp.(string)
+				uuids = append(uuids, uustr)
+
+				/* Create the stream if not already created. */
+				var pathint interface{}
+				if pathint, ok = streamMap["Path"]; ok {
+					path := pathint.(string)
+					pparts := strings.Split(path, "/")
+					collname := strings.Join(pparts[:len(pparts)-1], "/")
+					streamname := pparts[len(pparts)-1]
+					uu := uuid.Parse(uustr)
+					s := btrdbconn.StreamFromUUID(uu)
+					ex, err := s.Exists(context.Background())
+					if err != nil {
+						fmt.Printf("Warning: could not check if stream exists: %v", err)
+					} else if !ex {
+						s, err = btrdbconn.Create(context.Background(), uu, collname, map[string]string{"name": streamname}, nil)
+						if err != nil {
+							fmt.Printf("Warning: could not create stream: %v", err)
+						}
+					}
+				}
+			}
+			fmt.Printf("Starting process loop of uPMU %v\n", alias)
+			go startProcessLoop(ctx, serial, alias, uuids, &alive, complete, regex)
+			num_uPMUs++
+		}
 
 		for i = 0; i < num_uPMUs; i++ {
 			<-complete // block the main thread until all the goroutines say they're done
@@ -252,12 +275,12 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 
 	fmt.Println("Verifying that database indices exist...")
 	err = c.EnsureIndex(mgo.Index{
-		Key: []string{ "serial_number", "ytag", "name" },
+		Key: []string{"serial_number", "ytag", "name"},
 	})
 
 	if err == nil {
 		err = c.EnsureIndex(mgo.Index{
-			Key: []string{ "serial_number", "name" },
+			Key: []string{"serial_number", "name"},
 		})
 	}
 
@@ -277,13 +300,13 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Output, getValue upmuparser.InsertGetter, startTime int64, bc *btrdb.BTrDB, feedback chan int) {
 	var sampleRate float32 = output.SampleRate()
 	var numPoints int = int((1000.0 / sampleRate) + 0.5)
-	var timeDelta float64 = float64(sampleRate) * 1000000; // convert to nanoseconds
+	var timeDelta float64 = float64(sampleRate) * 1000000 // convert to nanoseconds
 
 	stream := bc.StreamFromUUID(uu)
 
 	points := make([]btrdb.RawPoint, numPoints)
 	for i := 0; i != len(points); i++ {
-		points[i].Time = startTime + int64((float64(i) * timeDelta) + 0.5)
+		points[i].Time = startTime + int64((float64(i)*timeDelta)+0.5)
 		points[i].Value = getValue(i, output)
 	}
 
@@ -337,7 +360,7 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 					continue
 				} else {
 					fmt.Println("Dumping bad file into error.dat...")
-					file, err = os.OpenFile("error.dat", os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0660)
+					file, err = os.OpenFile("error.dat", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0660)
 					if err == nil {
 						_, err = file.Write(rawdata)
 					}
@@ -408,7 +431,7 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 	err = documents.Err()
 	if err != nil {
 		fmt.Printf("Could not iterate through documents for uPMU %v: %v\nTerminating program...", alias, err)
-		*alive = false;
+		*alive = false
 	}
 
 	return documentsFound
@@ -421,7 +444,7 @@ func process_loop(ctx context.Context, keepalive *bool, coll *mgo.Collection, se
 			map[string]interface{}{
 				"ytag": map[string]int{
 					"$lt": ytagbase,
-				 },
+				},
 			}, map[string]interface{}{
 				"ytag": map[string]bool{
 					"$exists": false,
