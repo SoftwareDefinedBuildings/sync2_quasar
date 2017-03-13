@@ -225,10 +225,13 @@ func main() {
 					if err != nil {
 						fmt.Printf("Warning: could not check if stream exists: %v", err)
 					} else if !ex {
+						fmt.Printf("Creating stream %s (%s)\n", uu.String(), path)
 						s, err = btrdbconn.Create(context.Background(), uu, collname, map[string]string{"name": streamname}, nil)
 						if err != nil {
 							fmt.Printf("Warning: could not create stream: %v", err)
 						}
+					} else {
+						fmt.Printf("Stream %s (%s) already exists\n", uu.String(), path)
 					}
 				}
 			}
