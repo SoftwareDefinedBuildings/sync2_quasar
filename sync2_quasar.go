@@ -313,7 +313,9 @@ func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Ou
 		points[i].Value = getValue(i, output)
 	}
 
+	fmt.Printf("Called Insert() for %s\n", uu.String())
 	err := stream.Insert(ctx, points)
+	fmt.Printf("Insert() returned for %s\n", uu.String())
 	if err == nil {
 		feedback <- 0
 	} else {
@@ -346,6 +348,7 @@ func process(ctx context.Context, coll *mgo.Collection, query map[string]interfa
 	var documentsFound bool = false
 
 	for continueIteration {
+		fmt.Printf("Got a document from Mongo for %s (%s)\n", sernum, alias)
 		documentsFound = true
 
 		success = true
