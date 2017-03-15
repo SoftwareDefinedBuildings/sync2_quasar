@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SoftwareDefinedBuildings/btrdb/bte"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/configparser"
 	"github.com/SoftwareDefinedBuildings/sync2_quasar/upmuparser"
 	"gopkg.in/btrdb.v4"
@@ -216,6 +217,9 @@ func main() {
 				var pathint interface{}
 				if pathint, ok = streamMap["Path"]; ok {
 					path := pathint.(string)
+					if len(path) != 0 && path[0] == '/' {
+						path = path[1:]
+					}
 					pparts := strings.Split(path, "/")
 					collname := strings.Join(pparts[:len(pparts)-1], "/")
 					streamname := pparts[len(pparts)-1]
@@ -315,6 +319,9 @@ func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Ou
 
 	err := stream.Insert(ctx, points)
 	if err == nil {
+		feedback <- 0
+	} else if btrdb.ToCodedError(err).Code == bte.BadValue {
+		fmt.Printf("Skipping file: %v\n", err)
 		feedback <- 0
 	} else {
 		fmt.Printf("Error inserting data: %v\n", err)
