@@ -277,6 +277,7 @@ func startProcessLoop(ctx context.Context, serial_number string, alias string, u
 		return
 	}
 	session.SetSyncTimeout(0)
+	session.SetCursorTimeout(0)
 	session.SetSocketTimeout(24 * time.Hour)
 	c := session.DB("upmu_database").C("received_files")
 
