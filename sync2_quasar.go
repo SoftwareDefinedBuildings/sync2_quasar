@@ -323,7 +323,7 @@ func insert_stream(ctx context.Context, uu uuid.UUID, output *upmuparser.Sync_Ou
 }
 
 func process(ctx context.Context, coll *mgo.Collection, query map[string]interface{}, sernum string, alias string, uuids []uuid.UUID, bc *btrdb.BTrDB, alive *bool) bool {
-	var documents *mgo.Iter = coll.Find(query).Sort("name").Iter()
+	var documents *mgo.Iter = coll.Find(query).Iter()
 
 	var result map[string]interface{} = make(map[string]interface{})
 
